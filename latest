@@ -3,7 +3,7 @@
 cd
 
 # Install Neovim
-sudo apt install curl git cmake gettext -y
+sudo apt install curl unzip git cmake gettext -y
 
 ## Install latest npm
 sudo apt purge npm
