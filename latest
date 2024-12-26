@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd
+
 # Install Neovim
 sudo apt install curl git cmake gettext -y
 
@@ -23,6 +25,8 @@ git clone https://github.com/LazyVim/starter ~/.config/nvim
 rm -rf ~/.config/nvim/.git
 
 cd 
+rm nodesource_setup.sh
 rm -rf neovim-master
 rm master
+
 nvim
