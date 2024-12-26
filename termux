@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Install Neovim
+pkg update
 pkg install curl unzip git cmake gettext npm binutils tsu -y
 git clone https://github.com/neovim/neovim.git
 cd neovim
