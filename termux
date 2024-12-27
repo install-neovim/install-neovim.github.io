@@ -2,7 +2,7 @@
 
 # Install Neovim
 pkg update
-pkg install unzip git make cmake gettext nodejs binutils tsu -y
+pkg install unzip git wget make cmake gettext nodejs binutils tsu -y
 git clone https://github.com/neovim/neovim.git
 cd neovim
 make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
