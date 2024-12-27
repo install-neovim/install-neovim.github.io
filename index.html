@@ -14,7 +14,7 @@ sudo apt install curl unzip git cmake gettext npm -y
 wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
 unzip master
 cd neovim-master
-make CMAKE_BUILD_TYPE=RelWithDebInfo
+make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
 sudo make install
 
 # Install LazyVim
