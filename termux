@@ -4,12 +4,16 @@
 pkg update
 pkg install unzip git wget make cmake gettext nodejs binutils tsu -y
 
-# git clone https://github.com/neovim/neovim.git
+git clone https://github.com/neovim/neovim.git
+mkdir neovim/build
+cd neovim
+git checkout stable
+cd build
 # Git from GitHub maight be blocked by GFW
-wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
-unzip master
-mkdir neovim-master/build
-cd neovim-master/build
+# wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
+# unzip master
+# mkdir neovim-master/build
+# cd neovim-master/build
 cmake -DCMAKE_INSTALL_PREFIX=/data/data/com.termux/files/usr ..
 make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
 make install
@@ -20,9 +24,9 @@ mv ~/.local/share/nvim ~/.local/share/nvim.bak
 git clone https://github.com/LazyVim/starter ~/.config/nvim
 rm -rf ~/.config/nvim/.git
 
-cd 
-rm -rf neovim-master
-rm master
+cd
+rm -rf neovim/
+# rm master
 
 # pkg install which
 # curl -o /data/data/com.termux/files/usr/bin/install-in-mason  https://raw.githubusercontent.com/Amirulmuuminin/setup-mason-for-termux/main/install-in-mason
