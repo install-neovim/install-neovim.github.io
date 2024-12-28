@@ -1,20 +1,19 @@
 #!/bin/bash
 
 # Install Neovim
-pkg update
-pkg install unzip git wget make cmake gettext nodejs binutils tsu -y
+apt update && apt upgrade -y
+apt install curl wget sudo unzip git cmake gettext npm -y
 
-git clone https://github.com/neovim/neovim.git
-mkdir neovim/build
-cd neovim
-git checkout stable
-cd build
+## Install latest npm
+# curl -fsSL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh
+# sudo -E bash nodesource_setup.sh
+# sudo apt-get install -y nodejs
+
+# git clone https://github.com/neovim/neovim.git
 # Git from GitHub maight be blocked by GFW
-# wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
-# unzip master
-# mkdir neovim-master/build
-# cd neovim-master/build
-cmake -DCMAKE_INSTALL_PREFIX=/data/data/com.termux/files/usr ..
+wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
+unzip master
+cd neovim-master
 make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
 make install
 
@@ -25,12 +24,6 @@ git clone https://github.com/LazyVim/starter ~/.config/nvim
 rm -rf ~/.config/nvim/.git
 
 cd
-rm -rf neovim/
-# rm master
-
-# pkg install which
-# curl -o /data/data/com.termux/files/usr/bin/install-in-mason  https://raw.githubusercontent.com/Amirulmuuminin/setup-mason-for-termux/main/install-in-mason
-# chmod +x /data/data/com.termux/files/usr/bin/install-in-mason
-# install-in-mason lua-language-server
-
+rm -rf neovim-master
+rm master
 nvim
