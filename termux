@@ -8,6 +8,7 @@ pkg install unzip git wget make cmake gettext nodejs binutils tsu -y
 # Git from GitHub maight be blocked by GFW
 wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
 unzip master
+mkdir neovim-master/build
 cd neovim-master/build
 cmake -DCMAKE_INSTALL_PREFIX=/data/data/com.termux/files/usr ..
 make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
