@@ -11,6 +11,9 @@ sudo apt install curl wget unzip git cmake gettext npm -y
 
 # git clone https://github.com/neovim/neovim.git
 # Git from GitHub maight be blocked by GFW
+
+# Replace source 
+git config --global url."https://hub.fastgit.org/".insteadOf "https://github.com/"
 wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
 unzip master
 cd neovim-master

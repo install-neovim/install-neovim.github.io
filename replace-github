@@ -1,0 +1,5 @@
+#!/bin/sh
+
+find . -type f -name "*.sh" | xargs -I {} sed -i 's/\/\/github.com\//\/\/github.com.cnpmjs.org\//' {}
+find . -type f -name "*.conf" | xargs -I {} sed -i 's/\/\/github.com\//\/\/github.com.cnpmjs.org\//' {}
+find . -type f -name "*.conf" | xargs -I {} sed -i 's/http:\/\/w1.fi\//git:\/\/w1.fi\//' {}
