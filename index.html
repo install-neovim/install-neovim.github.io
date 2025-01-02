@@ -12,11 +12,12 @@ sudo apt install curl wget unzip git cmake gettext npm -y
 # git clone https://github.com/neovim/neovim.git
 # Git from GitHub maight be blocked by GFW
 
-# Replace source 
 wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
 unzip master
 cd neovim-master
-curl https://install-neovim.github.io/replace-github | bash
+
+# Replace github.com with githubfast.com 
+find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/githubfast.com\//' {}
 make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
 sudo make install
 
@@ -27,6 +28,6 @@ git clone https://githubfast.com/LazyVim/starter ~/.config/nvim
 rm -rf ~/.config/nvim/.git
 
 cd 
-rm -rf neovim-master
+sudo rm -rf neovim-master
 rm master
 nvim
