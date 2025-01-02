@@ -2,7 +2,7 @@
 
 # Install Neovim
 sudo apt update
-sudo apt install curl wget unzip git cmake gettext npm -y
+sudo apt install curl wget unzip git cmake gettext npm xclip -y
 
 ## Install latest npm
 # curl -fsSL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh
@@ -28,6 +28,9 @@ git clone https://githubfast.com/LazyVim/starter ~/.config/nvim
 cd ~/.config/nvim
 find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/githubfast.com\//' {}
 rm -rf ~/.config/nvim/.git
+
+# Uncomment this if you wanna set H and T as <Home> and <End>
+# curl https://install-neovim.github.io/keymap | bash
 
 cd 
 sudo rm -rf neovim-master
