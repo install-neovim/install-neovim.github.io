@@ -5,11 +5,9 @@ sudo touch /etc/systemd/system/docker.service.d/proxy.conf
 
 # Check whether the arg is provided
 if [ -z "$1" ]; then
-    echo "Usage: $0 <proxy_address:port>"
-    exit 1
+  echo "Usage: $0 <proxy_address:port>"
+  exit 1
 fi
 
-# Write proxy into the file 
-echo -e "[Service]\nEnvironment=\"HTTP_PROXY=http://$1/\"\nEnvironment=\"HTTPS_PROXY=http://$1/\"\nEnvironment=\"NO_PROXY=localhost,127.0.0.1,.example.com\"" | sudo tee -a /etc/systemd/system/docker.service.d/proxy.conf
-
-
+# Write proxy into the file
+echo -e "[Service]\nEnvironment=\"HTTP_PROXY=http://$1/\"\nEnvironment=\"HTTPS_PROXY=http://$1/\"\nEnvironment=\"NO_PROXY=localhost,127.0.0.1,.example.com\"" | sudo tee /etc/systemd/system/docker.service.d/proxy.conf
