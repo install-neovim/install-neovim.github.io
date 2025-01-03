@@ -1,0 +1,9 @@
+#!/bin/sh
+# For removing LazyVim
+
+
+rm -rf ~/.config/nvim
+
+rm -rf ~/.local/share/nvim
+
+rm -rf ~/.local/state/nvim 
