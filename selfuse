@@ -3,6 +3,7 @@
 # Install Neovim
 sudo apt update
 sudo apt install curl wget unzip git cmake gettext npm xclip -y
+npm config set registry https://registry.npmmirror.com
 
 ## Install latest npm
 # curl -fsSL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh
