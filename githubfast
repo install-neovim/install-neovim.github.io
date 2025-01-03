@@ -1,0 +1,3 @@
+#!/bin/sh
+
+find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/githubfast.com\//' {}
