@@ -11,3 +11,6 @@ fi
 
 # Write proxy into the file
 echo -e "[Service]\nEnvironment=\"HTTP_PROXY=http://$1/\"\nEnvironment=\"HTTPS_PROXY=http://$1/\"\nEnvironment=\"NO_PROXY=localhost,127.0.0.1,.example.com\"" | sudo tee /etc/systemd/system/docker.service.d/proxy.conf
+
+sudo systemctl daemon-reload
+sudo systemctl restart docker
