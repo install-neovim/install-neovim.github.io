@@ -1,0 +1,5 @@
+#!/bin/sh
+
+wget https://codeload.github.com/Elegycloud/clash-for-linux-backup/zip/refs/heads/main
+unzip main
+rm main
