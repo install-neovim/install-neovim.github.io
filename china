@@ -26,9 +26,16 @@ sudo make install
 # Install LazyVim
 mv ~/.config/nvim ~/.config/nvim.bak
 mv ~/.local/share/nvim ~/.local/share/nvim.bak
-git clone https://kkgithub.com/LazyVim/starter ~/.config/nvim
+git clone https://githubfast.com/LazyVim/starter ~/.config/nvim
+
+alias replace-github="find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/githubfast.com\//' {}"
 cd ~/.config/nvim
-find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/kkgithub.com\//' {}
+replace-github
+cd ~/.local/share/nvim/
+replace-github
+cd ~/.local/state/nvim/
+replace-github
+
 rm -rf ~/.config/nvim/.git
 
 # Uncomment this if you wanna set H and T as <Home> and <End>
