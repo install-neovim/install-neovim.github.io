@@ -3,38 +3,34 @@
 # Install Neovim
 sudo apt update
 sudo apt install curl wget unzip git cmake gettext npm xclip -y
-npm config set registry https://registry.npmmirror.com
 
-## Install latest npm
-# curl -fsSL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh
-# sudo -E bash nodesource_setup.sh
-# sudo apt-get install -y nodejs
+mkdir ~/install-neovim-temp
 
-# git clone https://github.com/neovim/neovim.git
-# Git from GitHub maight be blocked by GFW
-
-cd ~
+cd ~/install-neovim-temp
 wget https://codeload.github.com/neovim/neovim/zip/refs/heads/master
 unzip master
 cd neovim-master
 
-# Replace github.com with githubfast.com
-find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/githubfast.com\//' {}
 make CMAKE_BUILD_TYPE=RelWithDebInfo -j$(nproc)
 sudo make install
 
 # Install LazyVim
+cd ~/install-neovim-temp
 mv ~/.config/nvim ~/.config/nvim.bak
 mv ~/.local/share/nvim ~/.local/share/nvim.bak
-git clone https://githubfast.com/LazyVim/starter ~/.config/nvim
-# cd ~/.config/nvim
-# find . -type f | xargs -I {} sed -i 's/\/\/github.com\//\/\/githubfast.com\//' {}
+wget https://codeload.github.com/LazyVim/starter/zip/refs/heads/main
+unzip main
+mkdir ~/.config/nvim/
+mv starter-main/* ~/.config/nvim/
+
 rm -rf ~/.config/nvim/.git
 
 # Uncomment this if you wanna set H and T as <Home> and <End>
-curl https://install-neovim.github.io/keymap | bash
+cd ~/install-neovim-temp
+wget --retry-on-host-error https://install-neovim.github.io/keymap --tries=0
+sh keymap
 
-cd
-sudo rm -rf neovim-master
-rm master
+cd ~
+sudo rm ~/install-neovim-temp
+
 nvim
