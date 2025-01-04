@@ -1,0 +1,25 @@
+#!/bin/sh
+
+sudo mkdir /etc/docker
+
+sudo tee /etc/docker/daemon.json <<-'EOF'
+
+{
+
+    "registry-mirrors": [
+
+    	"https://docker.unsee.tech",
+
+        "https://dockerpull.org",
+
+        "https://docker.1panel.live",
+
+        "https://dockerhub.icu"
+
+    ]
+
+}
+
+EOF
+
+sudo systemctl daemon-reload && sudo systemctl restart docker

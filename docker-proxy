@@ -1,6 +1,6 @@
 #!/bin/sh
 
-sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo mkdir /etc/systemd/system/docker.service.d
 sudo touch /etc/systemd/system/docker.service.d/proxy.conf
 
 # Check whether the arg is provided
