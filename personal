@@ -32,6 +32,6 @@ wget --retry-on-host-error https://install-neovim.github.io/keymap --tries=0
 sh keymap
 
 cd ~
-sudo rm ~/install-neovim-temp
+sudo rm -rf ~/install-neovim-temp
 
 nvim
