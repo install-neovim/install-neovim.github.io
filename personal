@@ -20,6 +20,7 @@ mv ~/.config/nvim ~/.config/nvim.bak
 mv ~/.local/share/nvim ~/.local/share/nvim.bak
 wget https://codeload.github.com/LazyVim/starter/zip/refs/heads/main
 unzip main
+mkdir ~/.config/
 mkdir ~/.config/nvim/
 mv starter-main/* ~/.config/nvim/
 
