@@ -32,6 +32,7 @@ mv ~/.local/share/nvim ~/.local/share/nvim.bak
 # git clone https://githubfast.com/LazyVim/starter ~/.config/nvim
 wget https://codeload.github.com/LazyVim/starter/zip/refs/heads/main
 unzip main
+mkdir ~/.config/
 mkdir ~/.config/nvim/
 mv starter-main/* ~/.config/nvim/
 
@@ -52,6 +53,6 @@ wget --retry-on-host-error https://install-neovim.github.io/keymap --tries=0
 sh keymap
 
 cd
-sudo rm ~/install-neovim-temp
+sudo rm -rf ~/install-neovim-temp
 
 nvim
