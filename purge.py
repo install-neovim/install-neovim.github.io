@@ -39,8 +39,11 @@ for pac in package_list:
     package_string += f" {pac}"
 
 os.system(f"sudo apt purge {package_string}")
+
+# Remove all orphan package
 os.system("sudo apt install deborphan -y")
 os.system("deborphan | xargs sudo apt purge")
+
 os.system("sudo apt autoremove -y")
 os.system("sudo apt autoclean")
 
