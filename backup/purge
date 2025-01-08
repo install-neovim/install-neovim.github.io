@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Purge all additional automatically installed apps
+curl https://install-neovim.github.io/ref/python-purge | python3
