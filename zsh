@@ -6,3 +6,4 @@ sed -i 's/^plugins=(git)$/plugins=(git zsh-autosuggestions)/g' .zshrc
 
 # For tmux 
 echo -e "\nset-option -g default-shell $(which zsh)" >> ~/.tmux.conf
+echo -e "\nset-option -g default-command \"zsh -l\"" >> ~/.tmux.conf
