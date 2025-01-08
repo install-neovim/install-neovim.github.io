@@ -3,8 +3,8 @@
 cd
 
 # Install Neovim
-sudo apt update
-sudo apt install curl unzip git cmake gettext -y
+sudo DEBIAN_FRONTEND=noninteractive apt update
+sudo DEBIAN_FRONTEND=noninteractive apt install curl unzip git cmake gettext -y
 
 ## Install latest npm
 sudo apt purge npm

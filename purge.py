@@ -38,13 +38,13 @@ package_string = ""
 for pac in package_list:
     package_string += f" {pac}"
 
-os.system(f"sudo apt purge {package_string}")
+os.system(f"sudo DEBIAN_FRONTEND=noninteractive apt purge {package_string}")
 
 # Remove all orphan package
-os.system("sudo apt install deborphan -y")
-os.system("deborphan | xargs sudo apt purge")
+os.system("sudo DEBIAN_FRONTEND=noninteractive apt install deborphan -y")
+os.system("deborphan | xargs sudo DEBIAN_FRONTEND=noninteractive apt purge")
 
-os.system("sudo apt autoremove -y")
+os.system("sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y")
 os.system("sudo apt autoclean")
 
 # Clean config files of the removed apps

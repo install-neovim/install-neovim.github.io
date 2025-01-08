@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Install Neovim
-sudo apt update
-sudo apt install curl wget unzip git cmake gettext npm xclip -y
+sudo DEBIAN_FRONTEND=noninteractive apt update
+sudo DEBIAN_FRONTEND=noninteractive apt install curl wget unzip git cmake gettext npm xclip -y
 npm config set registry https://registry.npmmirror.com
 
 ## Install latest npm
