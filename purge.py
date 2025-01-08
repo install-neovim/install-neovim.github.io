@@ -43,4 +43,6 @@ os.system("sudo apt autoremove -y")
 os.system("sudo apt autoclean")
 
 # Clean config files of the removed apps
-os.system("sudo dpkg --purge $(dpkg -l | awk '/^rc/ {print $2}')")
+garb = os.popen("dpkg -l | grep '^rc'").read()
+if garb != "":
+    os.system("sudo dpkg --purge $(dpkg -l | awk '/^rc/ {print $2}')")
