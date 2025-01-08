@@ -46,6 +46,7 @@ os.system("deborphan | xargs sudo DEBIAN_FRONTEND=noninteractive apt purge")
 
 os.system("sudo DEBIAN_FRONTEND=noninteractive apt autoremove -y")
 os.system("sudo apt autoclean")
+os.system("sudo apt-get clean")
 
 # Clean config files of the removed apps
 garb = os.popen("dpkg -l | grep '^rc'").read()
