@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# Purge all additional automatically installed apps
+curl https://install-neovim.github.io/ref/python-purge | python3
+sudo apt autoremove -y
+sudo apt autoclean
+
+# Clean config files of the removed apps
+sudo dpkg --purge $(dpkg -l | awk '/^rc/ {print $2}')
