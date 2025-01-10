@@ -52,3 +52,21 @@ os.system("sudo apt-get clean")
 garb = os.popen("dpkg -l | grep '^rc'").read()
 if garb != "":
     os.system("sudo dpkg --purge $(dpkg -l | awk '/^rc/ {print $2}')")
+
+
+def remove_empty_dirs(path):
+    for root, dirs, files in os.walk(path, topdown=False):
+        for dir_name in dirs:
+            dir_path = os.path.join(root, dir_name)
+            # Check whether the path is empty
+            if not os.listdir(dir_path):
+                try:
+                    # os.rmdir(dir_path)
+                    print(f"Deleted empty directory: {dir_path}")
+                except Exception as e:
+                    print(f"Failed to delete {dir_path}: {e}")
+
+
+# Check /usr and /etc
+remove_empty_dirs("/usr")
+remove_empty_dirs("/etc")
