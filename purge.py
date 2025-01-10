@@ -89,11 +89,16 @@ def remove_empty_dirs(path):
             if should_exclude(dir_path):
                 continue
             if not os.listdir(dir_path):
-                try:
-                    os.rmdir(dir_path)
-                    print(f"Deleted empty directory: {dir_path}")
-                except Exception as e:
-                    print(f"Failed to delete {dir_path}: {e}")
+                # Check belonging
+                check_belonging = os.popen(
+                    f"dpkg-query -S {dir_path} 2>/dev/null"
+                ).read()
+                if check_belonging == "":
+                    try:
+                        os.rmdir(dir_path)
+                        print(f"Deleted empty directory: {dir_path}")
+                    except Exception as e:
+                        print(f"Failed to delete {dir_path}: {e}")
 
 
 remove_empty_dirs("/usr")
