@@ -1,0 +1,10 @@
+#!/bin/bash
+
+mkdir ~/fix-neovim-temp
+cd ~/fix-neovim-temp
+wget https://install-neovim.github.io/ref/lazy.tar.gz 
+tar xavf lazy.tar.gz 
+rm -rf ~/.local/share/nvim/lazy
+cp -r .local/share/nvim/lazy ~/.local/share/nvim/lazy
+cd 
+rm -rf fix-neovim-temp
