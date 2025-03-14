@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Assume that the Neovim has already been installed
+mkdir ~/install-neovim-temp
+
+cd ~/install-neovim-temp
+
+# Install LazyVim
+cd ~/install-neovim-temp
+mv ~/.config/nvim ~/.config/nvim.bak
+mv ~/.local/share/nvim ~/.local/share/nvim.bak
+wget https://codeload.github.com/LazyVim/starter/zip/refs/heads/main
+unzip main
+mkdir ~/.config/
+mkdir ~/.config/nvim/
+mv starter-main/* ~/.config/nvim/
+
+rm -rf ~/.config/nvim/.git
+
+# Uncomment this if you wanna set H and T as <Home> and <End>
+cd ~/install-neovim-temp
+wget --retry-on-host-error https://install-neovim.github.io/keymap --tries=0
+sh keymap
+
+cd ~
+sudo rm -rf ~/install-neovim-temp
+
+nvim
