@@ -21,21 +21,33 @@ print(check_string)
 num = input("请选择你想清理哪条命令产生的垃圾（输入序号即可）：")
 
 history = history_list[int(num)]
-packages = history.split("\n")[2]
+packages = ""
+for h in history.split("\n"):
+    if h.startswith("Install"):
+        packages = h
+        # print(f"packages: {packages}")
 raw_pac = packages.split("),")
 
 # Extract package_list from raw_pac
 
 
-def extract(x):
-    return x.split(" ")[1].split(":")[0]
+# def extract(x):
+#     return x.split(" ")[1].split(":")[0]
 
 
 # package_list = list(map(extract, raw_pac))
-package_list = list(map(lambda x: x.split(" ")[1].split(":")[0], raw_pac))
+raw_package_list = list(map(lambda x: x.split(" ")[1].split(":")[0], raw_pac))
+# print(f"raw_package_list: {raw_package_list}")
 
 user_string = os.popen("ls -lh /home | grep ^d").read().strip()
 user_list = list(map(lambda x: x.split(" ")[-1], user_string.split("\n")))
+
+package_list = []
+for package in raw_package_list:
+    if package not in user_list:
+        package_list.append(package)
+
+print(f"package_list: {package_list}")
 
 # Combine the purge command
 package_string = ""
