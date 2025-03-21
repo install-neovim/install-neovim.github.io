@@ -31,7 +31,11 @@ def extract(x):
     return x.split(" ")[1].split(":")[0]
 
 
-package_list = list(map(extract, raw_pac))
+# package_list = list(map(extract, raw_pac))
+package_list = list(map(lambda x: x.split(" ")[1].split(":")[0], raw_pac))
+
+user_string = os.popen("ls -lh /home | grep ^d").read().strip()
+user_list = list(map(lambda x: x.split(" ")[-1], user_string.split("\n")))
 
 # Combine the purge command
 package_string = ""
