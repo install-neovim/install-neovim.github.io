@@ -1,0 +1,10 @@
+#!/bin/bash
+
+cd
+mkdir chrome-temp
+cd chrome-temp
+wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -O chrome.deb
+sudo dpkg -i chrome.deb
+sudo apt-get install -f
+cd
+rm -rf chrome-temp
