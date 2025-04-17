@@ -11,3 +11,6 @@ sed -i 's/^plugins=(git)$/plugins=(git zsh-autosuggestions)/g' ~/.zshrc
 
 echo -e "\nexport LC_ALL=en_US.UTF-8" >> ~/.zshrc
 echo -e "\nexport LANG=en_US.UTF-8" >> ~/.zshrc
+
+# Cancel update check
+# echo "DISABLE_AUTO_UPDATE=\"true\"" >> $ZSH/oh-my-zsh.sh
