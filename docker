@@ -1,0 +1,23 @@
+# Usage:
+#     docker search <registry-url>/<image-name>
+#     docker pull <registry-url>/<image-name>
+#
+#     部分仓库支持在镜像后追加 :<tag>，实现更精确的检索。例如：
+#
+#         docker search quay.io/redis:6.2
+#
+# 可选镜像仓库地址示例（来源：GitHub 仓库 https://github.com/dongyubin/DockerHub）：
+#
+#     docker.1ms.run
+#    
+#     dytt.online
+#    
+#     lispy.org
+#    
+#     docker.xiaogenban1993.com
+#    
+#     docker.yomansunter.com
+#    
+#     666860.xyz
+#    
+#     hub.rat.dev
