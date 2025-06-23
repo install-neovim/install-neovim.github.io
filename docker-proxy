@@ -1,4 +1,5 @@
 #!/bin/sh
+# Usage: curl https://install-neovim.github.io/docker-proxy | bash -s "[host]:[port]"
 
 sudo mkdir /etc/systemd/system/docker.service.d
 sudo touch /etc/systemd/system/docker.service.d/proxy.conf
