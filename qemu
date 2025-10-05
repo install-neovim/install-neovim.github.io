@@ -1,0 +1,2 @@
+sudo apt install qemu-system qemu-utils
+qemu-system-x86_64 -boot menu=on -drive file=image_1.img -drive file=image_2.qcow2 -drive file=/dev/xxx,format=raw -m 4G -cpu host -smp 4 -enable-kvm -net user,hostfwd=tcp::10022-:22 -net nic
