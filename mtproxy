@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# setup_mtproxy.sh
+# Automatically installs and configures an MTProxy server (GetPageSpeed/MTProxy fork)
+# Prompts user for proxy port and enables client-side random padding in the printed links (dd prefix).
+# Tested target: Ubuntu 22.04. Run with sudo (script will re-run with sudo if needed).
+
+WORKDIR=/opt/MTProxy
+REPO=https://github.com/GetPageSpeed/MTProxy
+BUILD_DIR=/tmp/MTProxy_build
+STATS_PORT=8888
+PROXY_USER=mtproxy
+CRON_LINE="0 4 * * * curl -s https://core.telegram.org/getProxyConfig -o /opt/MTProxy/proxy-multi.conf && chown -R ${PROXY_USER}:${PROXY_USER} /opt/MTProxy && systemctl restart MTProxy.service"
+
+# Ensure script runs as root
+if [ "$EUID" -ne 0 ]; then
+  echo "This script must be run with sudo/root. Re-executing with sudo..."
+  exec sudo bash "$0" "$@"
+fi
+
+# Ask which port to run the proxy on
+read -rp "Enter the TCP port you want MTProxy to listen on (e.g. 8443): " PROXY_PORT
+PROXY_PORT=${PROXY_PORT:-8443}
+
+echo "==> Installing packages (git, curl, build-essential, libssl-dev, zlib1g-dev, xxd)..."
+apt-get update -y
+apt-get install -y git curl build-essential libssl-dev zlib1g-dev xxd
+
+# Clean previous build dir
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+echo "==> Cloning MTProxy fork ($REPO)"
+git clone "$REPO" .
+
+# Try to safely add -fcommon to COMMON_CFLAGS and COMMON_LDFLAGS in Makefile
+if grep -q "COMMON_CFLAGS" Makefile; then
+  sed -i 's/\(^COMMON_CFLAGS.*\)/\1 -fcommon/' Makefile || true
+fi
+if grep -q "COMMON_LDFLAGS" Makefile; then
+  sed -i 's/\(^COMMON_LDFLAGS.*\)/\1 -fcommon/' Makefile || true
+fi
+
+echo "==> Building MTProxy (this may take a minute)"
+make -j"$(nproc)"
+
+if [ ! -f objs/bin/mtproto-proxy ]; then
+  echo "Build failed: objs/bin/mtproto-proxy not found. Exiting." >&2
+  exit 1
+fi
+
+# Install binary
+mkdir -p "$WORKDIR"
+cp objs/bin/mtproto-proxy "$WORKDIR/"
+chmod +x "$WORKDIR/mtproto-proxy"
+
+cd "$WORKDIR"
+
+echo "==> Downloading Telegram proxy-secret and proxy-multi.conf"
+curl -s https://core.telegram.org/getProxySecret -o proxy-secret || true
+curl -s https://core.telegram.org/getProxyConfig -o proxy-multi.conf || true
+
+# If the files are empty or not downloaded, warn but continue
+if [ ! -s proxy-secret ]; then
+  echo "Warning: proxy-secret is empty or missing. The server will still work but many guides expect this file." >&2
+fi
+if [ ! -s proxy-multi.conf ]; then
+  echo "Warning: proxy-multi.conf is empty or missing. Proxy may still work but recommended to have config." >&2
+fi
+
+# Generate secret (16 bytes -> 32 hex chars)
+SECRET=$(head -c 16 /dev/urandom | xxd -ps)
+echo "Generated secret: $SECRET"
+
+# Create service user if doesn't exist
+if ! id -u "$PROXY_USER" >/dev/null 2>&1; then
+  echo "==> Creating user $PROXY_USER"
+  useradd -m -s /bin/false "$PROXY_USER"
+fi
+
+chown -R "$PROXY_USER":"$PROXY_USER" "$WORKDIR"
+
+# Discover private and public IPs for --nat-info
+echo "==> Detecting local/private IP and public IP (for --nat-info)"
+PRIVATE_IP=""
+PUBLIC_IP=""
+
+# Try AWS/EC2 metadata
+if curl -s --max-time 2 http://169.254.169.254/latest/meta-data/local-ipv4 >/dev/null 2>&1; then
+  PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)
+  PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || true)
+fi
+
+# Fallback for private IP
+if [ -z "$PRIVATE_IP" ]; then
+  PRIVATE_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+fi
+
+# Fallbacks for public IP (try external services)
+if [ -z "$PUBLIC_IP" ]; then
+  # Try ipify, ifconfig.co, icanhazip
+  for svc in https://api.ipify.org https://ifconfig.co https://icanhazip.com; do
+    PUBLIC_IP=$(curl -s --max-time 5 "$svc" || true)
+    PUBLIC_IP=$(echo "$PUBLIC_IP" | tr -d '\n' | tr -d ' ')
+    if [ -n "$PUBLIC_IP" ]; then
+      break
+    fi
+  done
+fi
+
+# Ask user if public IP still empty
+if [ -z "$PUBLIC_IP" ]; then
+  echo "Could not auto-detect your public IP. If you're running on a cloud provider behind NAT (AWS Lightsail etc), please enter the public IP or public DNS now." >&2
+  read -rp "Enter public IP or DNS (leave empty to continue without nat-info): " PUBLIC_IP
+fi
+
+# Build systemd service file
+SERVICE_PATH=/etc/systemd/system/MTProxy.service
+cat > "$SERVICE_PATH" <<EOF
+[Unit]
+Description=MTProxy
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$WORKDIR
+ExecStart=$WORKDIR/mtproto-proxy -u $PROXY_USER -p $STATS_PORT -H $PROXY_PORT -S $SECRET --aes-pwd $WORKDIR/proxy-secret $WORKDIR/proxy-multi.conf -M 1 --http-stats
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# If we have nat info, append --nat-info to ExecStart
+if [ -n "$PRIVATE_IP" ] && [ -n "$PUBLIC_IP" ]; then
+  echo "Adding --nat-info $PRIVATE_IP:$PUBLIC_IP to systemd service"
+  sed -i "s|--http-stats|--http-stats --nat-info $PRIVATE_IP:$PUBLIC_IP|" "$SERVICE_PATH"
+else
+  echo "Note: --nat-info was not added because private or public IP is missing. If you're on AWS behind NAT, you may need to add --nat-info <private>:<public> manually to $SERVICE_PATH and then systemctl daemon-reload + restart."
+fi
+
+# Reload systemd, enable and start service
+systemctl daemon-reload
+systemctl enable --now MTProxy.service
+
+# Check status
+sleep 1
+systemctl --no-pager status MTProxy.service || true
+
+# Configure UFW if present and active
+if command -v ufw >/dev/null 2>&1; then
+  UFW_STATUS=$(ufw status | head -n1 || true)
+  if echo "$UFW_STATUS" | grep -qi "Status: active"; then
+    echo "UFW active: allowing TCP port $PROXY_PORT"
+    ufw allow "$PROXY_PORT"/tcp || true
+  fi
+fi
+
+# Add root cron job for daily update (runs as root)
+( crontab -l 2>/dev/null | grep -v -F "${CRON_LINE}" || true; echo "$CRON_LINE" ) | crontab -
+
+# Output tg:// and https:// links with client-side padding enabled (dd prefix)
+if [ -n "$PUBLIC_IP" ]; then
+  TG_LINK="tg://proxy?server=${PUBLIC_IP}&port=${PROXY_PORT}&secret=dd${SECRET}"
+  HTTP_LINK="https://t.me/proxy?server=${PUBLIC_IP}&port=${PROXY_PORT}&secret=dd${SECRET}"
+else
+  TG_LINK="tg://proxy?server=<YOUR_PUBLIC_IP_OR_DOMAIN>&port=${PROXY_PORT}&secret=dd${SECRET}"
+  HTTP_LINK="https://t.me/proxy?server=<YOUR_PUBLIC_IP_OR_DOMAIN>&port=${PROXY_PORT}&secret=dd${SECRET}"
+fi
+
+cat <<-INFO
+
+✨ MTProxy setup complete!
+
+Secret (server-side, do NOT prefix dd here): $SECRET
+
+Client links (random padding enabled via dd prefix):
+  tg:   $TG_LINK
+  http: $HTTP_LINK
+
+Notes:
+ - If you're running on AWS Lightsail, remember to add a firewall rule (Networking tab) to allow TCP port $PROXY_PORT (and duplicate for IPv6 if you want).
+ - If your instance is behind NAT (AWS/Lightsail), and the script could not auto-detect both private and public IPs, you should edit $SERVICE_PATH and add: --nat-info <PRIVATE_IP>:<PUBLIC_IP> to the ExecStart line, then run:
+     sudo systemctl daemon-reload && sudo systemctl restart MTProxy.service
+ - Proxy stats endpoint (local): http://localhost:$STATS_PORT/stats
+ - Cron job was added to root crontab to update proxy-multi.conf daily at 04:00.
+
+If anything failed, check journalctl -u MTProxy.service and the files in $WORKDIR for clues.
+
+Happy proxying! 🎉
+INFO
+
