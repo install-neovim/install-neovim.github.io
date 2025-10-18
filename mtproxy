@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 set -euo pipefail
 
 # setup_mtproxy.sh
@@ -118,7 +117,7 @@ fi
 
 # Build systemd service file
 SERVICE_PATH=/etc/systemd/system/MTProxy.service
-cat > "$SERVICE_PATH" <<EOF
+cat >"$SERVICE_PATH" <<EOF
 [Unit]
 Description=MTProxy
 After=network.target
@@ -159,7 +158,10 @@ if command -v ufw >/dev/null 2>&1; then
 fi
 
 # Add root cron job for daily update (runs as root)
-( crontab -l 2>/dev/null | grep -v -F "${CRON_LINE}" || true; echo "$CRON_LINE" ) | crontab -
+(
+  crontab -l 2>/dev/null | grep -v -F "${CRON_LINE}" || true
+  echo "$CRON_LINE"
+) | crontab -
 
 # Output tg:// and https:// links with client-side padding enabled (dd prefix)
 if [ -n "$PUBLIC_IP" ]; then
@@ -191,4 +193,3 @@ If anything failed, check journalctl -u MTProxy.service and the files in $WORKDI
 
 Happy proxying! 🎉
 INFO
-
