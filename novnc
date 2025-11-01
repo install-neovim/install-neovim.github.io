@@ -1,0 +1,309 @@
+#!/bin/bash
+
+# noVNC and x11vnc auto-configuration script
+# Function: automatically configure x11vnc, pull noVNC, generate SSL certificate and start services
+
+set -e
+
+echo "Starting x11vnc + noVNC configuration..."
+
+# Detect sudo privileges
+echo "Checking user privileges..."
+HAS_SUDO=false
+if sudo -n true 2>/dev/null; then
+    HAS_SUDO=true
+    echo "Current user has sudo privileges"
+else
+    echo "Current user does not have sudo privileges or needs password"
+    read -p "Do you have sudo privileges? (y/N): " SUDO_CONFIRM
+    if [[ "$SUDO_CONFIRM" =~ ^[Yy]$ ]]; then
+        HAS_SUDO=true
+        echo "Will attempt to use sudo for privileged operations"
+    else
+        HAS_SUDO=false
+        echo "Will run in non-privileged mode, skipping steps requiring sudo"
+    fi
+fi
+
+# Default configuration variables
+DEFAULT_NOVNC_PORT="6080"
+DEFAULT_VNC_PORT="5900"
+DEFAULT_DISPLAY=":0"
+
+# Interactive user input
+echo "Please enter configuration parameters (press Enter for defaults):"
+
+read -p "noVNC web access port [default: $DEFAULT_NOVNC_PORT]: " USER_NOVNC_PORT
+read -p "VNC server port [default: $DEFAULT_VNC_PORT]: " USER_VNC_PORT
+read -p "X11 display [default: $DEFAULT_DISPLAY]: " USER_DISPLAY
+
+# Use user input or defaults
+NOVNC_PORT=${USER_NOVNC_PORT:-$DEFAULT_NOVNC_PORT}
+VNC_PORT=${USER_VNC_PORT:-$DEFAULT_VNC_PORT}
+DISPLAY=${USER_DISPLAY:-$DEFAULT_DISPLAY}
+
+VNC_SERVER="localhost:$VNC_PORT"
+
+# Validate port input
+if ! [[ "$NOVNC_PORT" =~ ^[0-9]+$ ]] || [ "$NOVNC_PORT" -lt 1024 ] || [ "$NOVNC_PORT" -gt 65535 ]; then
+  echo "Error: noVNC port must be a number between 1024-65535"
+  exit 1
+fi
+
+if ! [[ "$VNC_PORT" =~ ^[0-9]+$ ]] || [ "$VNC_PORT" -lt 5900 ] || [ "$VNC_PORT" -gt 6100 ]; then
+  echo "Error: VNC port must be a number between 5900-6100"
+  exit 1
+fi
+
+echo ""
+echo "Configuration confirmation:"
+echo "  noVNC web port: $NOVNC_PORT"
+echo "  VNC server port: $VNC_PORT"
+echo "  X11 display: $DISPLAY"
+echo "  Sudo privileges: $HAS_SUDO"
+echo ""
+
+read -p "Confirm to start installation? (y/N): " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+  echo "Installation cancelled"
+  exit 0
+fi
+
+# Configuration directories
+NOVNC_DIR="$HOME/noVNC"
+CONFIG_DIR="$HOME/vnc-config"
+SSL_CERT="$CONFIG_DIR/self.pem"
+VNC_PASSWD_FILE="$HOME/.vnc/passwd"
+
+# Create configuration directory
+mkdir -p "$CONFIG_DIR"
+
+# Install dependencies (only if has sudo privileges)
+if [ "$HAS_SUDO" = true ]; then
+  echo "1. Checking system dependencies..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update
+    sudo apt-get install -y git python3 numpy openssl net-tools x11vnc
+  elif command -v yum &>/dev/null; then
+    sudo yum install -y git python3 numpy openssl net-tools
+    sudo yum install -y epel-release
+    sudo yum install -y x11vnc
+  elif command -v dnf &>/dev/null; then
+    sudo dnf install -y git python3 numpy openssl net-tools x11vnc
+  else
+    echo "Warning: unknown package manager, please manually install: git, python3, numpy, openssl, net-tools, x11vnc"
+  fi
+else
+  echo "1. Skipping system dependency installation (no sudo privileges)"
+  echo "   Please ensure manually installed: git, python3, openssl, x11vnc"
+fi
+
+# Configure x11vnc password
+echo "2. Configuring x11vnc password..."
+if [ ! -f "$VNC_PASSWD_FILE" ]; then
+  echo "No existing VNC password file found, creating..."
+  mkdir -p "$(dirname "$VNC_PASSWD_FILE")"
+
+  # Generate random password
+  if command -v openssl &>/dev/null; then
+    RANDOM_PASSWORD=$(openssl rand -base64 12 | tr -d '/+' | cut -c1-8)
+    echo "Generated random VNC password: $RANDOM_PASSWORD"
+    echo "Please save this password!"
+  else
+    RANDOM_PASSWORD=$(date +%s | sha256sum | base64 | head -c 8)
+    echo "Generated random VNC password: $RANDOM_PASSWORD"
+    echo "Please save this password!"
+  fi
+
+  # Set password
+  x11vnc -storepasswd "$RANDOM_PASSWORD" "$VNC_PASSWD_FILE"
+  echo "VNC password saved to: $VNC_PASSWD_FILE"
+else
+  echo "Found existing VNC password file, skipping password setup: $VNC_PASSWD_FILE"
+  echo "To change password, manually run: x11vnc -storepasswd"
+fi
+
+# Create x11vnc start script
+echo "3. Creating x11vnc start script..."
+cat >"$CONFIG_DIR/start_x11vnc.sh" <<EOF
+#!/bin/bash
+echo "Starting x11vnc service..."
+echo "VNC port: $VNC_PORT, display: $DISPLAY"
+
+# Check if x11vnc is already running
+if pgrep -x "x11vnc" > /dev/null; then
+    echo "Found running x11vnc process, stopping..."
+    pkill -x "x11vnc"
+    sleep 2
+fi
+
+# Start x11vnc
+x11vnc -display $DISPLAY -auth guess -forever -shared -rfbauth "$VNC_PASSWD_FILE" -rfbport $VNC_PORT -listen 0.0.0.0 -o "$HOME/.vnc/x11vnc.log" &
+
+echo "x11vnc started, log file: $HOME/.vnc/x11vnc.log"
+EOF
+
+chmod +x "$CONFIG_DIR/start_x11vnc.sh"
+
+# Create x11vnc stop script
+cat >"$CONFIG_DIR/stop_x11vnc.sh" <<EOF
+#!/bin/bash
+echo "Stopping x11vnc service..."
+pkill -x "x11vnc" || true
+sleep 2
+if pgrep -x "x11vnc" > /dev/null; then
+    echo "Force stopping x11vnc..."
+    pkill -9 -x "x11vnc"
+fi
+echo "x11vnc stopped"
+EOF
+
+chmod +x "$CONFIG_DIR/stop_x11vnc.sh"
+
+# Start x11vnc
+echo "4. Starting x11vnc..."
+"$CONFIG_DIR/start_x11vnc.sh"
+
+# Clone noVNC project
+echo "5. Pulling noVNC project..."
+if [ ! -d "$NOVNC_DIR" ]; then
+  git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
+else
+  echo "noVNC directory already exists, skipping clone"
+  echo -n "Update code? (y/N): "
+  read UPDATE_CONFIRM
+  if [[ "$UPDATE_CONFIRM" =~ ^[Yy]$ ]]; then
+    cd "$NOVNC_DIR"
+    git pull
+  fi
+fi
+
+# Enter project directory
+cd "$NOVNC_DIR"
+
+# Generate SSL certificate
+echo "6. Generating SSL certificate..."
+if [ ! -f "$SSL_CERT" ]; then
+  echo "Generating SSL certificate..."
+  openssl req -new -x509 -days 365 -nodes \
+    -out "$SSL_CERT" \
+    -keyout "$SSL_CERT" \
+    -subj "/C=CN/ST=State/L=City/O=Organization/OU=OrgUnit/CN=novnc-server"
+  echo "SSL certificate generated: $SSL_CERT"
+else
+  echo "SSL certificate already exists, skipping generation"
+  echo -n "Regenerate certificate? (y/N): "
+  read REGEN_CONFIRM
+  if [[ "$REGEN_CONFIRM" =~ ^[Yy]$ ]]; then
+    mv "$SSL_CERT" "$SSL_CERT.backup.$(date +%s)"
+    openssl req -new -x509 -days 365 -nodes \
+      -out "$SSL_CERT" \
+      -keyout "$SSL_CERT" \
+      -subj "/C=CN/ST=State/L=City/O=Organization/OU=OrgUnit/CN=novnc-server"
+    echo "New SSL certificate generated: $SSL_CERT"
+  fi
+fi
+
+# Check websockify
+echo "7. Checking websockify..."
+if [ ! -d "$NOVNC_DIR/utils/websockify" ]; then
+  echo "Downloading websockify..."
+  git clone https://github.com/novnc/websockify.git "$NOVNC_DIR/utils/websockify"
+fi
+
+# Create noVNC start script
+echo "8. Creating noVNC start script..."
+cat >"$CONFIG_DIR/start_novnc.sh" <<EOF
+#!/bin/bash
+cd "$NOVNC_DIR"
+echo "Starting noVNC service..."
+echo "Access URL: https://\$(hostname -I | awk '{print \$1}'):$NOVNC_PORT/vnc.html"
+./utils/novnc_proxy --vnc $VNC_SERVER --listen $NOVNC_PORT --cert "$SSL_CERT"
+EOF
+
+chmod +x "$CONFIG_DIR/start_novnc.sh"
+
+# Create noVNC stop script
+cat >"$CONFIG_DIR/stop_novnc.sh" <<EOF
+#!/bin/bash
+echo "Stopping noVNC service..."
+pkill -f "novnc_proxy" || true
+pkill -f "websockify" || true
+echo "noVNC service stopped"
+EOF
+
+chmod +x "$CONFIG_DIR/stop_novnc.sh"
+
+# Create unified management script
+echo "9. Creating unified management script..."
+cat >"$CONFIG_DIR/start_vnc_service.sh" <<EOF
+#!/bin/bash
+echo "Starting complete VNC service..."
+
+# Start x11vnc
+echo "1. Starting x11vnc..."
+$CONFIG_DIR/start_x11vnc.sh
+
+# Wait for x11vnc to start
+sleep 3
+
+# Start noVNC
+echo "2. Starting noVNC..."
+cd "$NOVNC_DIR"
+./utils/novnc_proxy --vnc $VNC_SERVER --listen $NOVNC_PORT --cert "$SSL_CERT" &
+sleep 2
+
+echo ""
+echo "VNC service started!"
+echo "Access URL: https://\$(hostname -I | awk '{print \$1}'):$NOVNC_PORT/vnc.html"
+echo "VNC password: Use the previously set password"
+EOF
+
+chmod +x "$CONFIG_DIR/start_vnc_service.sh"
+
+cat >"$CONFIG_DIR/stop_vnc_service.sh" <<EOF
+#!/bin/bash
+echo "Stopping all VNC services..."
+$CONFIG_DIR/stop_x11vnc.sh
+$CONFIG_DIR/stop_novnc.sh
+echo "All VNC services stopped"
+EOF
+
+chmod +x "$CONFIG_DIR/stop_vnc_service.sh"
+
+# Display final information
+echo ""
+echo "x11vnc + noVNC configuration completed!"
+echo ""
+echo "Basic information:"
+echo "   - noVNC directory: $NOVNC_DIR"
+echo "   - Configuration directory: $CONFIG_DIR (secure, not accessible via web)"
+echo "   - SSL certificate: $SSL_CERT"
+echo "   - noVNC web port: $NOVNC_PORT"
+echo "   - VNC server port: $VNC_PORT"
+echo "   - VNC password file: $VNC_PASSWD_FILE"
+echo "   - Sudo privileges: $HAS_SUDO"
+echo ""
+echo "Start methods:"
+echo "   1. Unified start: $CONFIG_DIR/start_vnc_service.sh"
+echo "   2. Unified stop: $CONFIG_DIR/stop_vnc_service.sh"
+echo "   3. Start x11vnc only: $CONFIG_DIR/start_x11vnc.sh"
+echo "   4. Start noVNC only: $CONFIG_DIR/start_novnc.sh"
+
+echo ""
+echo "Access URL:"
+SERVER_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "Your server IP")
+echo "   https://$SERVER_IP:$NOVNC_PORT/vnc.html"
+echo ""
+echo "Notes:"
+echo "   - First access will show certificate warning, click continue"
+echo "   - VNC password is saved, to change run: x11vnc -storepasswd"
+echo "   - Certificate and scripts are in secure directory, not exposed via web"
+
+# Ask to start noVNC service
+echo ""
+read -p "Start noVNC service now? (y/N): " START_NOW
+if [[ "$START_NOW" =~ ^[Yy]$ ]]; then
+  echo "Starting noVNC service..."
+  "$CONFIG_DIR/start_novnc.sh"
+fi
