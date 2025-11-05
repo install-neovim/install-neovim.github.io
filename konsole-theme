@@ -1,0 +1,360 @@
+#!/bin/bash
+
+# Konsole 自动 Profile 切换 Systemd 服务安装脚本
+
+set -e # 遇到错误立即退出
+
+echo "================================================"
+echo "  Konsole 自动 Profile 切换 Systemd 服务安装程序"
+echo "================================================"
+echo
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 函数：打印彩色消息
+info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# 检查是否以正确用户运行
+if [ "$(id -u)" -eq 0 ]; then
+  warning "您正在以 root 用户运行此脚本。"
+  echo "这可能会在权限方面产生问题，因为 Konsole 是用户级应用程序。"
+  echo "建议以普通用户身份运行此脚本。"
+  read -p "是否继续？(y/N): " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    info "退出脚本。"
+    exit 1
+  fi
+fi
+
+# 获取当前用户名
+CURRENT_USER=$(whoami)
+info "当前用户: $CURRENT_USER"
+
+# 询问目标用户
+echo
+read -p "请输入要安装服务的用户名 [默认: $CURRENT_USER]: " TARGET_USER
+TARGET_USER=${TARGET_USER:-$CURRENT_USER}
+
+# 验证用户是否存在
+if ! id "$TARGET_USER" &>/dev/null; then
+  error "用户 '$TARGET_USER' 不存在！"
+  exit 1
+fi
+
+# 获取目标用户的家目录
+if [ "$TARGET_USER" == "root" ]; then
+  TARGET_HOME="/root"
+else
+  TARGET_HOME="/home/$TARGET_USER"
+fi
+
+# 验证家目录是否存在
+if [ ! -d "$TARGET_HOME" ]; then
+  error "用户 '$TARGET_USER' 的家目录 '$TARGET_HOME' 不存在！"
+  exit 1
+fi
+
+info "目标用户: $TARGET_USER"
+info "家目录: $TARGET_HOME"
+
+# 询问 Konsole Profile 名称
+echo
+info "请输入您的 Konsole Profile 名称"
+read -p "深色主题 Profile 名称 [默认: Dark]: " DARK_PROFILE
+DARK_PROFILE=${DARK_PROFILE:-"Dark"}
+
+read -p "浅色主题 Profile 名称 [默认: Light]: " LIGHT_PROFILE
+LIGHT_PROFILE=${LIGHT_PROFILE:-"Light"}
+
+# 询问切换时间
+echo
+info "请输入主题切换时间（24小时制）"
+read -p "切换到浅色主题的时间 [默认: 06]: " LIGHT_HOUR
+LIGHT_HOUR=${LIGHT_HOUR:-"06"}
+
+read -p "切换到深色主题的时间 [默认: 18]: " DARK_HOUR
+DARK_HOUR=${DARK_HOUR:-"18"}
+
+# 验证时间格式
+if ! [[ "$LIGHT_HOUR" =~ ^[0-9]+$ ]] || [ "$LIGHT_HOUR" -lt 0 ] || [ "$LIGHT_HOUR" -gt 23 ]; then
+  error "无效的浅色主题切换时间！必须是 0-23 之间的数字。"
+  exit 1
+fi
+
+if ! [[ "$DARK_HOUR" =~ ^[0-9]+$ ]] || [ "$DARK_HOUR" -lt 0 ] || [ "$DARK_HOUR" -gt 23 ]; then
+  error "无效的深色主题切换时间！必须是 0-23 之间的数字。"
+  exit 1
+fi
+
+# 显示配置摘要
+echo
+info "配置摘要:"
+echo "  - 目标用户: $TARGET_USER"
+echo "  - 家目录: $TARGET_HOME"
+echo "  - 深色主题: $DARK_PROFILE"
+echo "  - 浅色主题: $LIGHT_PROFILE"
+echo "  - 浅色主题切换时间: $LIGHT_HOUR:00"
+echo "  - 深色主题切换时间: $DARK_HOUR:00"
+echo
+
+read -p "确认上述配置并继续安装？(y/N): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  info "安装已取消。"
+  exit 0
+fi
+
+# 创建必要的目录
+info "创建必要的目录..."
+mkdir -p "$TARGET_HOME/.local/bin"
+mkdir -p "$TARGET_HOME/.config/systemd/user"
+mkdir -p "$TARGET_HOME/.local/share/konsole"
+
+# 检查并创建 Dark Profile
+DARK_PROFILE_FILE="$TARGET_HOME/.local/share/konsole/$DARK_PROFILE.profile"
+if [ ! -f "$DARK_PROFILE_FILE" ]; then
+  info "创建深色主题 Profile: $DARK_PROFILE_FILE"
+  cat >"$DARK_PROFILE_FILE" <<EOF
+[Appearance]
+ColorScheme=Breeze
+Font=Hack Nerd Font Mono,14,-1,5,400,0,0,0,0,0,0,0,0,0,0,1
+
+[Cursor Options]
+CursorShape=0
+CustomCursorColor=255,255,255
+UseCustomCursorColor=true
+
+[General]
+Name=$DARK_PROFILE
+Parent=FALLBACK/
+TerminalColumns=115
+TerminalRows=31
+
+[Terminal Features]
+BlinkingCursorEnabled=false
+EOF
+  success "深色主题 Profile 已创建"
+else
+  info "深色主题 Profile 已存在: $DARK_PROFILE_FILE"
+fi
+
+# 检查并创建 Light Profile
+LIGHT_PROFILE_FILE="$TARGET_HOME/.local/share/konsole/$LIGHT_PROFILE.profile"
+if [ ! -f "$LIGHT_PROFILE_FILE" ]; then
+  info "创建浅色主题 Profile: $LIGHT_PROFILE_FILE"
+  cat >"$LIGHT_PROFILE_FILE" <<EOF
+[Appearance]
+ColorScheme=BlackOnWhite
+Font=Hack,14,-1,7,400,0,0,0,0,0,0,0,0,0,0,1
+UseFontBrailleChararacters=true
+
+[General]
+Name=$LIGHT_PROFILE
+Parent=FALLBACK/
+TerminalColumns=115
+TerminalRows=31
+EOF
+  success "浅色主题 Profile 已创建"
+else
+  info "浅色主题 Profile 已存在: $LIGHT_PROFILE_FILE"
+fi
+
+# 创建 Konsole 自动切换脚本
+AUTO_PROFILE_SCRIPT="$TARGET_HOME/.local/bin/konsole_auto_profile.sh"
+info "创建 Konsole 自动切换脚本: $AUTO_PROFILE_SCRIPT"
+
+cat >"$AUTO_PROFILE_SCRIPT" <<EOF
+#!/bin/bash
+
+# Konsole 自动 Profile 切换脚本
+# 由安装脚本自动生成
+
+# 配置部分
+DARK_PROFILE="$DARK_PROFILE.profile"
+LIGHT_PROFILE="$LIGHT_PROFILE.profile"
+DAY_START_HOUR=$LIGHT_HOUR
+NIGHT_START_HOUR=$DARK_HOUR
+
+# 获取当前小时
+CURRENT_HOUR=\$(date +%H)
+
+# 判断当前应该使用哪个主题
+if [ "\$CURRENT_HOUR" -ge "\$DAY_START_HOUR" ] && [ "\$CURRENT_HOUR" -lt "\$NIGHT_START_HOUR" ]; then
+    SELECTED_PROFILE="\$LIGHT_PROFILE"
+    TIME_PERIOD="白天"
+else
+    SELECTED_PROFILE="\$DARK_PROFILE"
+    TIME_PERIOD="夜晚"
+fi
+
+echo "\$(date): 当前时间 \$CURRENT_HOUR 时，\$TIME_PERIOD 模式，切换到 \$SELECTED_PROFILE"
+
+# 设置默认 Profile
+kwriteconfig5 --file ~/.config/konsolerc --group "Desktop Entry" --key "DefaultProfile" "\$SELECTED_PROFILE"
+
+# 尝试切换已打开的 Konsole 窗口
+switch_open_konsole() {
+    # 查找可用的 qdbus 命令
+    local QDBUS_CMD=""
+    for cmd in qdbus-qt6 qdbus qdbus6 qdbus-qt5; do
+        if command -v "\$cmd" &>/dev/null; then
+            QDBUS_CMD="\$cmd"
+            break
+        fi
+    done
+    
+    if [[ -n "\$QDBUS_CMD" ]]; then
+        # 获取所有 Konsole 服务
+        local KONSOLE_SERVICES=\$(\$QDBUS_CMD | grep konsole 2>/dev/null)
+        
+        for SERVICE in \$KONSOLE_SERVICES; do
+            # 获取所有会话并切换 Profile
+            local SESSIONS=\$(\$QDBUS_CMD "\$SERVICE" /Sessions 2>/dev/null)
+            for SESSION in \$SESSIONS; do
+                \$QDBUS_CMD "\$SERVICE" "\$SESSION" setProfile "\$SELECTED_PROFILE" 2>/dev/null
+            done
+        done
+        echo "已尝试切换已打开的 Konsole 窗口"
+    else
+        echo "未找到 qdbus 命令，无法切换已打开的窗口"
+    fi
+}
+
+# 调用函数切换已打开窗口
+switch_open_konsole
+
+echo "Konsole Profile 已切换到: \$SELECTED_PROFILE"
+EOF
+
+# 设置脚本权限
+chmod +x "$AUTO_PROFILE_SCRIPT"
+success "Konsole 自动切换脚本已创建并设置可执行权限"
+
+# 创建 systemd 服务文件
+SERVICE_FILE="$TARGET_HOME/.config/systemd/user/konsole-auto-profile.service"
+info "创建 systemd 服务文件: $SERVICE_FILE"
+
+cat >"$SERVICE_FILE" <<EOF
+[Unit]
+Description=Auto switch Konsole profile based on time
+After=network.target
+
+[Service]
+Type=oneshot
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=$TARGET_HOME/.Xauthority"
+ExecStart=$AUTO_PROFILE_SCRIPT
+
+[Install]
+WantedBy=default.target
+EOF
+
+success "Systemd 服务文件已创建"
+
+# 创建 systemd 定时器文件
+TIMER_FILE="$TARGET_HOME/.config/systemd/user/konsole-auto-profile.timer"
+info "创建 systemd 定时器文件: $TIMER_FILE"
+
+cat >"$TIMER_FILE" <<EOF
+[Unit]
+Description=Timer for auto switching Konsole profile based on time
+Requires=konsole-auto-profile.service
+
+[Timer]
+# 在指定时间切换到浅色主题
+OnCalendar=*-*-* $LIGHT_HOUR:00:00
+# 在指定时间切换到深色主题
+OnCalendar=*-*-* $DARK_HOUR:00:00
+# 如果错过定时（如计算机关机），在启动后尽快执行一次
+Persistent=true
+# 随机延迟，避免同时执行多个定时任务导致系统负载过高
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+success "Systemd 定时器文件已创建"
+
+# 设置文件所有权（如果以 root 运行且目标用户不是当前用户）
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "$CURRENT_USER" ]; then
+  info "设置文件所有权给用户 $TARGET_USER"
+  chown -R "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/bin/konsole_auto_profile.sh"
+  chown -R "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.local/share/konsole/"
+  chown -R "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.config/systemd/user/konsole-auto-profile.service"
+  chown -R "$TARGET_USER:$TARGET_USER" "$TARGET_HOME/.config/systemd/user/konsole-auto-profile.timer"
+fi
+
+# 重新加载 systemd 配置
+info "重新加载 systemd 用户配置..."
+if [ "$TARGET_USER" = "$CURRENT_USER" ]; then
+  # 当前用户，直接运行
+  systemctl --user daemon-reload
+else
+  # 其他用户，使用 sudo 运行
+  sudo -u "$TARGET_USER" systemctl --user daemon-reload
+fi
+success "Systemd 配置已重新加载"
+
+# 启用并启动定时器
+info "启用并启动 systemd 定时器..."
+if [ "$TARGET_USER" = "$CURRENT_USER" ]; then
+  systemctl --user enable --now konsole-auto-profile.timer
+else
+  sudo -u "$TARGET_USER" systemctl --user enable --now konsole-auto-profile.timer
+fi
+success "Systemd 定时器已启用并启动"
+
+# 检查定时器状态
+info "检查定时器状态..."
+if [ "$TARGET_USER" = "$CURRENT_USER" ]; then
+  systemctl --user status konsole-auto-profile.timer --no-pager
+else
+  sudo -u "$TARGET_USER" systemctl --user status konsole-auto-profile.timer --no-pager
+fi
+
+# 显示最终信息
+echo
+success "Konsole 自动 Profile 切换服务安装完成！"
+echo
+info "已创建的文件:"
+echo "  - 深色主题 Profile: $DARK_PROFILE_FILE"
+echo "  - 浅色主题 Profile: $LIGHT_PROFILE_FILE"
+echo "  - 切换脚本: $AUTO_PROFILE_SCRIPT"
+echo "  - 服务文件: $SERVICE_FILE"
+echo "  - 定时器文件: $TIMER_FILE"
+echo
+info "管理命令:"
+echo "  - 查看定时器状态: systemctl --user status konsole-auto-profile.timer"
+echo "  - 查看服务日志: journalctl --user -u konsole-auto-profile.service"
+echo "  - 手动运行切换: $AUTO_PROFILE_SCRIPT"
+echo "  - 禁用服务: systemctl --user disable --now konsole-auto-profile.timer"
+echo
+info "下次登录时，服务将自动启动。"
+info "新的 Konsole 窗口将根据时间自动使用对应的 Profile。"
+
+# 询问是否立即测试
+echo
+read -p "是否立即测试服务？(y/N): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  info "执行测试..."
+  if [ "$TARGET_USER" = "$CURRENT_USER" ]; then
+    "$AUTO_PROFILE_SCRIPT"
+  else
+    sudo -u "$TARGET_USER" "$AUTO_PROFILE_SCRIPT"
+  fi
+  success "测试完成！"
+fi
+
+echo
+success "安装过程全部完成！"
