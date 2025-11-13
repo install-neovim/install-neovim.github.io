@@ -142,26 +142,26 @@ else
   echo "⚠️ cpupower 未安装或不支持，跳过 CPU 调优。"
 fi
 # ---------- 8.2️⃣ 启用 nohz_full (如果支持) ----------
-echo ">>> 检查并启用 nohz_full (如果内核支持)..."
-if grep -q "CONFIG_NO_HZ_FULL=y" /boot/config-$(uname -r) 2>/dev/null; then
-  CPU_CORES=$(nproc --all)
-  NOHZ_RANGE="1-$(($CPU_CORES - 1))"
-  if ! grep -q "nohz_full=" /etc/default/grub; then
-    sudo sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"nohz_full=$NOHZ_RANGE /" /etc/default/grub
-    sudo update-grub || true
-    echo "✅ nohz_full 已添加到 GRUB，重启后生效。"
-  else
-    echo "⚠️ nohz_full 已配置，跳过。"
-  fi
-else
-  echo "⚠️ 内核不支持 nohz_full，跳过。"
-fi
+# echo ">>> 检查并启用 nohz_full (如果内核支持)..."
+# if grep -q "CONFIG_NO_HZ_FULL=y" /boot/config-$(uname -r) 2>/dev/null; then
+#   CPU_CORES=$(nproc --all)
+#   NOHZ_RANGE="1-$(($CPU_CORES - 1))"
+#   if ! grep -q "nohz_full=" /etc/default/grub; then
+#     sudo sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"nohz_full=$NOHZ_RANGE /" /etc/default/grub
+#     sudo update-grub || true
+#     echo "✅ nohz_full 已添加到 GRUB，重启后生效。"
+#   else
+#     echo "⚠️ nohz_full 已配置，跳过。"
+#   fi
+# else
+#   echo "⚠️ 内核不支持 nohz_full，跳过。"
+# fi
 # ---------- 8.3️⃣ 网络和 IRQ 优化 ----------
 echo ">>> 优化网络接口..."
 # 禁用 WiFi 如果存在
-if command -v nmcli &>/dev/null; then
-  sudo nmcli radio wifi off || true
-fi
+# if command -v nmcli &>/dev/null; then
+#   sudo nmcli radio wifi off || true
+# fi
 # 对于所有网络接口，禁用 WoL 和合并 IRQ
 for iface in $(ip link show | grep -oP '(?<=: )\w+(?=:)' | grep -v lo); do
   if [[ $iface == eth* || $iface == en* ]]; then
