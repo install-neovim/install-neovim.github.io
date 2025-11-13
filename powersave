@@ -1,62 +1,62 @@
 #!/usr/bin/env bash
 # ===============================================================
-# 🔋 Linux Server Power Optimization Script v3
-# Author: Warren & ChatGPT
+# 🔋 Linux Server Power Optimization Script v4
+# Author: Warren & ChatGPT & Grok
 # Tested on: Ubuntu 24.04 / 25.10 (Server & Desktop)
 # ===============================================================
-
 set -e
 echo "==============================================================="
-echo "🔧 自动节能优化脚本 v3 启动中..."
+echo "🔧 自动节能优化脚本 v4 启动中..."
 echo "==============================================================="
-
 # ---------- 基础环境 ----------
 export DEBIAN_FRONTEND=noninteractive
 sudo apt update -y || true
-
 # ---------- 1️⃣ 安装依赖 ----------
-echo ">>> 安装 PowerTOP / cpupower / lm-sensors ..."
-sudo apt install -y powertop linux-tools-common linux-tools-generic lm-sensors || true
-
+echo ">>> 安装 PowerTOP / cpupower / lm-sensors / ethtool ..."
+sudo apt install -y powertop linux-tools-common linux-tools-generic lm-sensors ethtool || true
 # 尝试安装 cpupower 工具
 if ! command -v cpupower &>/dev/null; then
   echo "⚙️ 安装 cpupower 工具包..."
   sudo apt install -y linux-tools-$(uname -r) || true
 fi
-
 # ---------- 2️⃣ 创建 powertop-autotune 服务 ----------
 echo ">>> 配置 PowerTOP 自动调优服务..."
 sudo tee /etc/systemd/system/powertop-autotune.service >/dev/null <<'EOF'
 [Unit]
 Description=PowerTOP auto tuning
 After=multi-user.target
-
 [Service]
 Type=simple
 ExecStart=/usr/bin/bash -c "sleep 15 && /usr/sbin/powertop --auto-tune"
 Restart=on-failure
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
 sudo systemctl daemon-reload
 sudo systemctl enable powertop-autotune
 sudo systemctl start powertop-autotune || true
-
 # ---------- 3️⃣ 安装 TLP 或 Power-Profiles-Daemon ----------
 echo ">>> 安装并启用 TLP 电源管理..."
-
 # 禁用 power-profiles-daemon，防止冲突
 sudo systemctl stop power-profiles-daemon 2>/dev/null || true
 sudo systemctl disable power-profiles-daemon 2>/dev/null || true
 sudo systemctl mask power-profiles-daemon 2>/dev/null || true
-
 # 安装 TLP
 if ! dpkg -l | grep -q tlp; then
   sudo apt install -y tlp tlp-rdw || true
 fi
-
+# ---------- 3.1️⃣ 优化 TLP 配置 ----------
+echo ">>> 优化 TLP 配置..."
+sudo tee -a /etc/tlp.conf >/dev/null <<'EOF'
+CPU_SCALING_GOVERNOR_ON_AC="powersave"
+CPU_SCALING_GOVERNOR_ON_BAT="powersave"
+CPU_ENERGY_PERF_POLICY_ON_AC="balance_power"
+CPU_ENERGY_PERF_POLICY_ON_BAT="power"
+DEVICES_TO_DISABLE_ON_STARTUP="bluetooth wifi wwan"
+RUNTIME_PM_ON_AC="auto"
+RUNTIME_PM_ON_BAT="auto"
+EOF
+sudo tlp start || true
 # ---------- 4️⃣ 修复 plymouth 卡死问题 ----------
 echo ">>> 检查并修复 plymouth 卡死问题..."
 if systemctl list-jobs | grep -q "plymouth-quit-wait.service"; then
@@ -68,33 +68,28 @@ if systemctl list-jobs | grep -q "plymouth-quit-wait.service"; then
   sudo systemctl daemon-reexec
   sudo systemctl daemon-reload
 fi
-
 # ---------- 5️⃣ 启动 TLP，带超时保护 ----------
 echo ">>> 启动 TLP 服务..."
 sudo systemctl start tlp &
-
 sleep 5
 if systemctl list-jobs | grep -q "tlp.service"; then
   echo "⚠️ systemd 启动 TLP 超时，改用命令行方式启动..."
   sudo killall -9 systemctl 2>/dev/null || true
   sudo tlp start
 fi
-
 # ---------- 6️⃣ 创建 GPU 自动功率管理脚本 ----------
 if command -v nvidia-smi &>/dev/null; then
   echo ">>> 创建 GPU 自动功率调节脚本..."
   sudo tee /usr/local/bin/gpu-auto-power.sh >/dev/null <<'EOF'
 #!/usr/bin/env bash
-GPU_MIN=60    # 待机时功率限制
-GPU_MAX=150   # 高负载时功率限制
-
+GPU_MIN=50 # 待机时功率限制 (降低阈值以进一步优化)
+GPU_MAX=150 # 高负载时功率限制
 while true; do
     GPU_UTIL=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1)
     if [[ -z "$GPU_UTIL" ]]; then
         sleep 30
         continue
     fi
-
     if (( GPU_UTIL < 10 )); then
         nvidia-smi -pl $GPU_MIN >/dev/null 2>&1
     elif (( GPU_UTIL > 50 )); then
@@ -104,27 +99,25 @@ while true; do
 done
 EOF
   sudo chmod +x /usr/local/bin/gpu-auto-power.sh
-
   sudo tee /etc/systemd/system/gpu-auto-power.service >/dev/null <<'EOF'
 [Unit]
 Description=GPU Auto Power Management
 After=multi-user.target
-
 [Service]
 ExecStart=/usr/local/bin/gpu-auto-power.sh
 Restart=always
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
   sudo systemctl daemon-reload
   sudo systemctl enable gpu-auto-power
   sudo systemctl start gpu-auto-power
+  # 启用 NVIDIA 持久模式
+  echo ">>> 启用 NVIDIA 持久模式..."
+  sudo nvidia-smi -pm 1 || true
 else
   echo "⚠️ 未检测到 NVIDIA GPU，跳过 GPU 功率管理。"
 fi
-
 # ---------- 7️⃣ 优化 journald ----------
 echo ">>> 优化 systemd-journald..."
 sudo bash -c 'cat > /etc/systemd/journald.conf <<EOF
@@ -133,14 +126,57 @@ Storage=volatile
 RuntimeMaxUse=50M
 EOF'
 sudo systemctl restart systemd-journald
-
 # ---------- 8️⃣ 停用无关服务 ----------
 echo ">>> 停用不必要的系统服务..."
-for svc in bluetooth.service cups.service avahi-daemon.service ModemManager.service thermald.service; do
+for svc in bluetooth.service cups.service avahi-daemon.service ModemManager.service thermald.service fwupd.service systemd-oomd.service; do
   sudo systemctl stop $svc 2>/dev/null || true
   sudo systemctl disable $svc 2>/dev/null || true
 done
-
+sudo systemctl mask accounts-daemon.service 2>/dev/null || true
+# ---------- 8.1️⃣ CPU 调优 (带容错) ----------
+echo ">>> 优化 CPU 调度器和空闲状态..."
+if command -v cpupower &>/dev/null; then
+  sudo cpupower frequency-set -g powersave || true
+  sudo cpupower idle-set -E || true
+else
+  echo "⚠️ cpupower 未安装或不支持，跳过 CPU 调优。"
+fi
+# ---------- 8.2️⃣ 启用 nohz_full (如果支持) ----------
+echo ">>> 检查并启用 nohz_full (如果内核支持)..."
+if grep -q "CONFIG_NO_HZ_FULL=y" /boot/config-$(uname -r) 2>/dev/null; then
+  CPU_CORES=$(nproc --all)
+  NOHZ_RANGE="1-$(($CPU_CORES - 1))"
+  if ! grep -q "nohz_full=" /etc/default/grub; then
+    sudo sed -i "s/GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"nohz_full=$NOHZ_RANGE /" /etc/default/grub
+    sudo update-grub || true
+    echo "✅ nohz_full 已添加到 GRUB，重启后生效。"
+  else
+    echo "⚠️ nohz_full 已配置，跳过。"
+  fi
+else
+  echo "⚠️ 内核不支持 nohz_full，跳过。"
+fi
+# ---------- 8.3️⃣ 网络和 IRQ 优化 ----------
+echo ">>> 优化网络接口..."
+# 禁用 WiFi 如果存在
+if command -v nmcli &>/dev/null; then
+  sudo nmcli radio wifi off || true
+fi
+# 对于所有网络接口，禁用 WoL 和合并 IRQ
+for iface in $(ip link show | grep -oP '(?<=: )\w+(?=:)' | grep -v lo); do
+  if [[ $iface == eth* || $iface == en* ]]; then
+    sudo ethtool -s $iface wol d || true
+    sudo ethtool -C $iface rx-usecs 1000 || true
+  fi
+done
+# ---------- 8.4️⃣ Sysctl 内核参数优化 ----------
+echo ">>> 优化 sysctl 参数..."
+sudo tee -a /etc/sysctl.conf >/dev/null <<'EOF'
+vm.dirty_writeback_centisecs = 1500
+vm.swappiness = 10
+kernel.nmi_watchdog = 0
+EOF
+sudo sysctl -p || true
 # ---------- 9️⃣ 验证状态 ----------
 echo "==============================================================="
 echo "✅ 优化完成，正在检查服务状态..."
@@ -150,4 +186,5 @@ systemctl is-active tlp && echo "✅ TLP：运行中" || echo "⚠️ TLP 未在
 systemctl is-active gpu-auto-power && echo "✅ GPU 自动功率管理：运行中" || echo "⚠️ 无 GPU 管理服务"
 echo "==============================================================="
 echo "🔋 优化完成！建议运行 'sudo powertop' 查看效果。"
+echo "重启系统以应用某些更改（如 GRUB 配置）。"
 echo "==============================================================="
