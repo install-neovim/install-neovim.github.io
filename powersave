@@ -1,106 +1,112 @@
-#!/bin/bash
-# ===========================================================
-#  CUDA 家庭服务器节能优化脚本
-#  作者：ChatGPT  (for Warren)
-# ===========================================================
+#!/usr/bin/env bash
+# ===============================================================
+# Ubuntu 家庭服务器自动节能优化脚本 v2
+# 适用于 24/7 CUDA 服务器：在闲时节能，在训练时性能优先
+# Tested on Ubuntu 22.04–25.10
+# ===============================================================
 
-echo "=== 🚀 开始执行服务器节能优化设置 ==="
+set -e
 
-# -----------------------------------------------------------
-# 1. 基础依赖
-# -----------------------------------------------------------
-sudo apt update
-sudo apt install -y powertop tlp tlp-rdw cpupower git
+echo ">>> 🚀 启动 Ubuntu 家庭服务器优化流程 v2"
 
-# -----------------------------------------------------------
-# 2. 启用 PowerTOP 自动调优
-# -----------------------------------------------------------
-echo ">>> 启用 PowerTOP 自动调优..."
-sudo tee /etc/systemd/system/powertop.service >/dev/null <<'EOF'
+# -------------------------------
+# 1️⃣ 确认需要的仓库已启用
+# -------------------------------
+echo ">>> 检查并启用 universe 仓库..."
+sudo add-apt-repository universe -y >/dev/null 2>&1 || true
+sudo apt update -y
+
+# -------------------------------
+# 2️⃣ 安装关键依赖
+# -------------------------------
+echo ">>> 安装常用性能调优工具..."
+sudo apt install -y ethtool lm-sensors smartmontools hdparm curl wget net-tools pciutils usbutils
+
+# CPU 电源控制工具
+echo ">>> 安装 cpupower 或替代包..."
+sudo apt install -y linux-tools-generic || sudo apt install -y linux-tools-common || true
+
+# PowerTOP：功耗分析与自动调优
+echo ">>> 安装 PowerTOP..."
+sudo apt install -y powertop || true
+
+# -------------------------------
+# 3️⃣ 创建 powertop-autotune 服务（防丢）
+# -------------------------------
+echo ">>> 创建 powertop-autotune.service ..."
+sudo tee /etc/systemd/system/powertop-autotune.service >/dev/null <<'EOF'
 [Unit]
 Description=PowerTOP auto tuning
+After=multi-user.target
 
 [Service]
-Type=oneshot
-ExecStart=/usr/sbin/powertop --auto-tune
+Type=simple
+ExecStart=/usr/bin/bash -c "sleep 15 && /usr/sbin/powertop --auto-tune"
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl enable powertop
-sudo systemctl start powertop
+sudo systemctl daemon-reload
+sudo systemctl enable powertop-autotune
+sudo systemctl start powertop-autotune || echo "⚠️ PowerTOP 自动调优启动失败，请稍后检查"
 
-# -----------------------------------------------------------
-# 3. 启用并配置 TLP
-# -----------------------------------------------------------
-echo ">>> 启用 TLP 电源管理..."
-sudo systemctl enable tlp
-sudo systemctl start tlp
-
-sudo sed -i 's/^#CPU_SCALING_GOVERNOR_ON_AC=.*/CPU_SCALING_GOVERNOR_ON_AC=performance/' /etc/tlp.conf
-sudo sed -i 's/^#CPU_SCALING_GOVERNOR_ON_BAT=.*/CPU_SCALING_GOVERNOR_ON_BAT=powersave/' /etc/tlp.conf
-sudo sed -i 's/^#NMI_WATCHDOG=.*/NMI_WATCHDOG=0/' /etc/tlp.conf
-sudo sed -i 's/^#SCHED_POWERSAVE_ON_AC=.*/SCHED_POWERSAVE_ON_AC=1/' /etc/tlp.conf
-sudo sed -i 's/^#RUNTIME_PM_ON_AC=.*/RUNTIME_PM_ON_AC=auto/' /etc/tlp.conf
-sudo sed -i 's/^#PCIE_ASPM_ON_AC=.*/PCIE_ASPM_ON_AC=performance/' /etc/tlp.conf
-
-# -----------------------------------------------------------
-# 4. 关闭无关常驻服务
-# -----------------------------------------------------------
-echo ">>> 停用不必要的系统服务..."
-for svc in plymouth bluetooth avahi-daemon cups fwupd systemd-oomd apache2; do
-  sudo systemctl disable --now $svc 2>/dev/null
-done
-
-# -----------------------------------------------------------
-# 5. 优化日志系统
-# -----------------------------------------------------------
-echo ">>> 优化 systemd-journald..."
-sudo sed -i 's/^#Storage=.*/Storage=volatile/' /etc/systemd/journald.conf
-sudo systemctl restart systemd-journald
-
-# -----------------------------------------------------------
-# 6. 安装 auto-cpufreq 智能 CPU 调频工具
-# -----------------------------------------------------------
-echo ">>> 安装 auto-cpufreq..."
-if ! command -v auto-cpufreq &>/dev/null; then
-  git clone https://github.com/AdnanHodzic/auto-cpufreq.git /tmp/auto-cpufreq
-  cd /tmp/auto-cpufreq && sudo ./auto-cpufreq-installer
-  sudo auto-cpufreq --install
+# -------------------------------
+# 4️⃣ 安装电源管理守护进程（TLP 或替代）
+# -------------------------------
+echo ">>> 安装并启用 TLP 或替代方案..."
+if ! dpkg -l | grep -q tlp; then
+  sudo apt install -y tlp tlp-rdw || {
+    echo "⚠️ TLP 不可用，尝试安装 power-profiles-daemon..."
+    sudo apt install -y power-profiles-daemon
+    sudo systemctl enable power-profiles-daemon
+    sudo systemctl start power-profiles-daemon
+    echo "✅ 已启用 power-profiles-daemon 替代 TLP"
+  }
+else
+  sudo systemctl enable tlp
+  sudo systemctl start tlp
+  echo "✅ TLP 已启用"
 fi
 
-# -----------------------------------------------------------
-# 7. 创建 GPU 动态功率管理脚本
-# -----------------------------------------------------------
-echo ">>> 创建 GPU 动态功率管理脚本..."
+# -------------------------------
+# 5️⃣ 创建 GPU 自动功率脚本
+# -------------------------------
+echo ">>> 创建 GPU 自动功率调节脚本..."
 sudo tee /usr/local/bin/gpu-auto-power.sh >/dev/null <<'EOF'
-#!/bin/bash
-# 自动根据 GPU 负载调节功率限制
-HIGH_POWER=150
-LOW_POWER=60
-GPU_IDLE_THRESHOLD=3
-SLEEP_INTERVAL=60
+#!/usr/bin/env bash
+# GPU 自动功率调节：检测空闲状态并降低功率限制
+LOG_FILE="/var/log/gpu_auto_power.log"
+IDLE_LIMIT=10   # GPU 使用率低于此阈值则视为空闲（%）
+LOW_POWER=60    # 空闲时功率限制（瓦）
+FULL_POWER=150  # 活动时功率限制（瓦）
 
 while true; do
-  util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)
-  if [ "$util" -lt "$GPU_IDLE_THRESHOLD" ]; then
-    nvidia-smi -pl $LOW_POWER > /dev/null
-  else
-    nvidia-smi -pl $HIGH_POWER > /dev/null
-  fi
-  sleep $SLEEP_INTERVAL
+    UTIL=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1)
+    if [[ -z "$UTIL" ]]; then
+        sleep 60
+        continue
+    fi
+
+    if (( UTIL < IDLE_LIMIT )); then
+        nvidia-smi -pl $LOW_POWER >/dev/null 2>&1
+        echo "$(date): GPU idle ($UTIL%), set power limit to ${LOW_POWER}W" >> "$LOG_FILE"
+    else
+        nvidia-smi -pl $FULL_POWER >/dev/null 2>&1
+        echo "$(date): GPU active ($UTIL%), set power limit to ${FULL_POWER}W" >> "$LOG_FILE"
+    fi
+    sleep 60
 done
 EOF
+
 sudo chmod +x /usr/local/bin/gpu-auto-power.sh
 
-# -----------------------------------------------------------
-# 8. 注册 GPU 自动调节服务
-# -----------------------------------------------------------
+# 创建 GPU 自动服务
 sudo tee /etc/systemd/system/gpu-auto-power.service >/dev/null <<'EOF'
 [Unit]
-Description=Auto GPU Power Management
-After=network.target
+Description=GPU auto power management
+After=multi-user.target
 
 [Service]
 ExecStart=/usr/local/bin/gpu-auto-power.sh
@@ -110,19 +116,34 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
+sudo systemctl daemon-reload
 sudo systemctl enable gpu-auto-power
 sudo systemctl start gpu-auto-power
 
-# -----------------------------------------------------------
-# 9. 收尾
-# -----------------------------------------------------------
-echo "=== ✅ 节能优化已完成！ ==="
-echo "系统将："
-echo " - 自动应用 powertop 节能调优"
-echo " - 启用 TLP 优化 CPU/PCIe 电源"
-echo " - 自动调节 GPU 功率（空闲降功率）"
-echo " - 智能 CPU 调频（auto-cpufreq）"
-echo " - 禁用无关后台服务"
-echo
-echo "建议运行：sudo powertop 观察 Wakeups 是否显著下降 (<100 wakeups/s)"
+# -------------------------------
+# 6️⃣ 优化 journald 和 swap
+# -------------------------------
+echo ">>> 优化 journald 日志与 swap 策略..."
+sudo sed -i 's/^#SystemMaxUse=.*$/SystemMaxUse=200M/' /etc/systemd/journald.conf
+sudo sed -i 's/^#RuntimeMaxUse=.*$/RuntimeMaxUse=100M/' /etc/systemd/journald.conf
+sudo systemctl restart systemd-journald
 
+# 降低 swap 使用倾向（避免训练被强制换出）
+echo "vm.swappiness=10" | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
+sudo sysctl -p /etc/sysctl.d/99-swappiness.conf
+
+# -------------------------------
+# ✅ 完成
+# -------------------------------
+echo
+echo "=============================================================="
+echo "🎉 优化完成！当前服务状态："
+systemctl is-active powertop-autotune && echo "✅ PowerTOP 自动调优运行中"
+systemctl is-active tlp && echo "✅ TLP 运行中" || systemctl is-active power-profiles-daemon && echo "✅ power-profiles-daemon 运行中"
+systemctl is-active gpu-auto-power && echo "✅ GPU 自动功率调节运行中"
+echo "=============================================================="
+echo "提示："
+echo "  • 查看 GPU 状态：nvidia-smi --query-gpu=power.limit,power.draw --format=csv"
+echo "  • 查看节能情况：sudo powertop"
+echo "  • 日志文件路径：/var/log/gpu_auto_power.log"
+echo "=============================================================="
