@@ -1,0 +1,128 @@
+#!/bin/bash
+# ===========================================================
+#  CUDA 家庭服务器节能优化脚本
+#  作者：ChatGPT  (for Warren)
+# ===========================================================
+
+echo "=== 🚀 开始执行服务器节能优化设置 ==="
+
+# -----------------------------------------------------------
+# 1. 基础依赖
+# -----------------------------------------------------------
+sudo apt update
+sudo apt install -y powertop tlp tlp-rdw cpupower git
+
+# -----------------------------------------------------------
+# 2. 启用 PowerTOP 自动调优
+# -----------------------------------------------------------
+echo ">>> 启用 PowerTOP 自动调优..."
+sudo tee /etc/systemd/system/powertop.service >/dev/null <<'EOF'
+[Unit]
+Description=PowerTOP auto tuning
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/powertop --auto-tune
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable powertop
+sudo systemctl start powertop
+
+# -----------------------------------------------------------
+# 3. 启用并配置 TLP
+# -----------------------------------------------------------
+echo ">>> 启用 TLP 电源管理..."
+sudo systemctl enable tlp
+sudo systemctl start tlp
+
+sudo sed -i 's/^#CPU_SCALING_GOVERNOR_ON_AC=.*/CPU_SCALING_GOVERNOR_ON_AC=performance/' /etc/tlp.conf
+sudo sed -i 's/^#CPU_SCALING_GOVERNOR_ON_BAT=.*/CPU_SCALING_GOVERNOR_ON_BAT=powersave/' /etc/tlp.conf
+sudo sed -i 's/^#NMI_WATCHDOG=.*/NMI_WATCHDOG=0/' /etc/tlp.conf
+sudo sed -i 's/^#SCHED_POWERSAVE_ON_AC=.*/SCHED_POWERSAVE_ON_AC=1/' /etc/tlp.conf
+sudo sed -i 's/^#RUNTIME_PM_ON_AC=.*/RUNTIME_PM_ON_AC=auto/' /etc/tlp.conf
+sudo sed -i 's/^#PCIE_ASPM_ON_AC=.*/PCIE_ASPM_ON_AC=performance/' /etc/tlp.conf
+
+# -----------------------------------------------------------
+# 4. 关闭无关常驻服务
+# -----------------------------------------------------------
+echo ">>> 停用不必要的系统服务..."
+for svc in plymouth bluetooth avahi-daemon cups fwupd systemd-oomd apache2; do
+  sudo systemctl disable --now $svc 2>/dev/null
+done
+
+# -----------------------------------------------------------
+# 5. 优化日志系统
+# -----------------------------------------------------------
+echo ">>> 优化 systemd-journald..."
+sudo sed -i 's/^#Storage=.*/Storage=volatile/' /etc/systemd/journald.conf
+sudo systemctl restart systemd-journald
+
+# -----------------------------------------------------------
+# 6. 安装 auto-cpufreq 智能 CPU 调频工具
+# -----------------------------------------------------------
+echo ">>> 安装 auto-cpufreq..."
+if ! command -v auto-cpufreq &>/dev/null; then
+  git clone https://github.com/AdnanHodzic/auto-cpufreq.git /tmp/auto-cpufreq
+  cd /tmp/auto-cpufreq && sudo ./auto-cpufreq-installer
+  sudo auto-cpufreq --install
+fi
+
+# -----------------------------------------------------------
+# 7. 创建 GPU 动态功率管理脚本
+# -----------------------------------------------------------
+echo ">>> 创建 GPU 动态功率管理脚本..."
+sudo tee /usr/local/bin/gpu-auto-power.sh >/dev/null <<'EOF'
+#!/bin/bash
+# 自动根据 GPU 负载调节功率限制
+HIGH_POWER=150
+LOW_POWER=60
+GPU_IDLE_THRESHOLD=3
+SLEEP_INTERVAL=60
+
+while true; do
+  util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits)
+  if [ "$util" -lt "$GPU_IDLE_THRESHOLD" ]; then
+    nvidia-smi -pl $LOW_POWER > /dev/null
+  else
+    nvidia-smi -pl $HIGH_POWER > /dev/null
+  fi
+  sleep $SLEEP_INTERVAL
+done
+EOF
+sudo chmod +x /usr/local/bin/gpu-auto-power.sh
+
+# -----------------------------------------------------------
+# 8. 注册 GPU 自动调节服务
+# -----------------------------------------------------------
+sudo tee /etc/systemd/system/gpu-auto-power.service >/dev/null <<'EOF'
+[Unit]
+Description=Auto GPU Power Management
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/gpu-auto-power.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable gpu-auto-power
+sudo systemctl start gpu-auto-power
+
+# -----------------------------------------------------------
+# 9. 收尾
+# -----------------------------------------------------------
+echo "=== ✅ 节能优化已完成！ ==="
+echo "系统将："
+echo " - 自动应用 powertop 节能调优"
+echo " - 启用 TLP 优化 CPU/PCIe 电源"
+echo " - 自动调节 GPU 功率（空闲降功率）"
+echo " - 智能 CPU 调频（auto-cpufreq）"
+echo " - 禁用无关后台服务"
+echo
+echo "建议运行：sudo powertop 观察 Wakeups 是否显著下降 (<100 wakeups/s)"
+
