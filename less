@@ -1,31 +1,61 @@
 #!/bin/bash
-
 set -e
+
+LINE="export LESSCHARSET=utf-8"
+
+# List of possible rc files
+RC_FILES=(
+  "$HOME/.zshrc"
+  "$HOME/.config/zsh/.zshrc"
+  "$HOME/.bashrc"
+  "$HOME/.bash_profile"
+  "$HOME/.profile"
+)
 
 echo "Setting LESSCHARSET=utf-8 for current shell..."
 export LESSCHARSET=utf-8
 
-add_to_file() {
-    local file="$1"
-    local line="export LESSCHARSET=utf-8"
+echo
+echo "Updating configuration files..."
+UPDATED_FILES=()
 
-    if [ -f "$file" ]; then
-        # Check whether the line already exists
-        if ! grep -Fxq "$line" "$file"; then
-            echo "$line" >> "$file"
-            echo "→ Added to $file"
-        else
-            echo "✓ Already present in $file, skipping"
-        fi
-    else
-        echo "· $file not found, skipping"
+for file in "${RC_FILES[@]}"; do
+  dir=$(dirname "$file")
+
+  # Ensure directory exists (for ~/.config/zsh)
+  if [ ! -d "$dir" ]; then
+    mkdir -p "$dir"
+  fi
+
+  # Create file if it does not exist
+  if [ ! -f "$file" ]; then
+    echo "# Created by setup_less_utf8.sh" >"$file"
+  fi
+
+  # Append only if not present
+  if ! grep -Fxq "$LINE" "$file"; then
+    echo "$LINE" >>"$file"
+    UPDATED_FILES+=("$file")
+    echo "→ Added to $file"
+  else
+    echo "✓ Already present in $file"
+  fi
+done
+
+echo
+if [ ${#UPDATED_FILES[@]} -gt 0 ]; then
+  echo "Sourcing updated files to apply changes immediately..."
+  for f in "${UPDATED_FILES[@]}"; do
+    # Only source readable files
+    if [ -r "$f" ]; then
+      # shellcheck disable=SC1090
+      source "$f"
+      echo "→ Sourced $f"
     fi
-}
+  done
+else
+  echo "No files changed; nothing to reload."
+fi
 
-echo "Updating shell config files..."
-
-add_to_file "$HOME/.zshrc"
-add_to_file "$HOME/.bashrc"
-
-echo "Done. Restart your terminal to apply changes."
-
+echo
+echo "All done! LESSCHARSET=utf-8 is now active."
