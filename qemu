@@ -10,37 +10,29 @@
 sudo -E qemu-system-x86_64 \
   -boot menu=on \
   \
-  # ---------- 光盘 / ISO ----------
   -cdrom installer.iso \
   \
-  # ---------- 磁盘 ----------
   -drive file=image_1.img \
   -drive file=image_2.qcow2 \
   -drive file=/dev/xxx,format=raw \
   \
-  # ---------- 资源 ----------
   -m 4G \
   -cpu host \
   -smp 4 \
   -enable-kvm \
   \
-  # ---------- 网络 ----------
   -net user,hostfwd=tcp::10022-:22,hostfwd=tcp::20808-:10808 \
   -net nic \
   \
-  # ---------- UEFI ----------
   -bios /usr/share/ovmf/OVMF.fd \
   \
-  # ---------- USB ----------
   -usb \
   -device usb-tablet \
   -device usb-host,vendorid=0x0e8d,productid=0x201c \
   \
-  # ---------- 图形 ----------
   -vga virtio \
   -display gtk \
   \
-  # ---------- 调试 / 控制 ----------
   -monitor stdio \
   -serial mon:stdio
 
@@ -161,4 +153,3 @@ sudo -E qemu-system-x86_64 \
 # - virt-manager 和 GNOME Boxes 是桌面 GUI
 # - Cockpit / Kimchi 是 Web UI，可远程访问
 # - 底层使用 libvirt 管理 QEMU/KVM 虚拟机
-
