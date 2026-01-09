@@ -1,7 +1,164 @@
-sudo apt install qemu-system qemu-utils
-qemu-system-x86_64 -boot menu=on -drive file=image_1.img -drive file=image_2.qcow2 -drive file=/dev/xxx,format=raw -m 4G -cpu host -smp 4 -enable-kvm -net user,hostfwd=tcp::10022-:22 -net nic
+#!/usr/bin/env bash
+# =========================
+# QEMU 启动全集模板（默认可直接运行）
+# 修改参数后直接执行即可
+# =========================
 
-# 如果是远程 SSH 开启 QEMU，则需要配置 DISPLAY 环境变量
-# 以及使用 sudo -E 保留环境变量运行
-export DISPLAY=:10 
-sudo -E qemu-...
+# ---------- 远程 SSH + X11 时使用 ----------
+# export DISPLAY=:10
+
+sudo -E qemu-system-x86_64 \
+  -boot menu=on \
+  \
+  # ---------- 光盘 / ISO ----------
+  -cdrom installer.iso \
+  \
+  # ---------- 磁盘 ----------
+  -drive file=image_1.img \
+  -drive file=image_2.qcow2 \
+  -drive file=/dev/xxx,format=raw \
+  \
+  # ---------- 资源 ----------
+  -m 4G \
+  -cpu host \
+  -smp 4 \
+  -enable-kvm \
+  \
+  # ---------- 网络 ----------
+  -net user,hostfwd=tcp::10022-:22,hostfwd=tcp::20808-:10808 \
+  -net nic \
+  \
+  # ---------- UEFI ----------
+  -bios /usr/share/ovmf/OVMF.fd \
+  \
+  # ---------- USB ----------
+  -usb \
+  -device usb-tablet \
+  -device usb-host,vendorid=0x0e8d,productid=0x201c \
+  \
+  # ---------- 图形 ----------
+  -vga virtio \
+  -display gtk \
+  \
+  # ---------- 调试 / 控制 ----------
+  -monitor stdio \
+  -serial mon:stdio
+
+# =========================
+# 安装
+# =========================
+# sudo apt install qemu-system qemu-utils
+
+# =========================
+# 光盘 / ISO
+# =========================
+# -cdrom ubuntu-20.04.iso
+# -boot order=d            # 强制从 CD-ROM 启动
+# 安装完成后可直接注释 -cdrom
+
+# =========================
+# 磁盘
+# =========================
+# -drive file=ubuntu20.qcow2
+# -drive file=/dev/sda,format=raw
+# -snapshot                  # 不落盘运行
+
+# =========================
+# CPU / 内存
+# =========================
+# -m 2G
+# -smp 8
+# -cpu max
+
+# =========================
+# 网络
+# =========================
+# -net user
+# -net user,hostfwd=tcp::10022-:22
+# -net user,hostfwd=tcp::20808-:10808
+# -net nic
+# -net none
+
+# =========================
+# UEFI
+# =========================
+# -bios /usr/share/ovmf/OVMF.fd
+# （Legacy BIOS 启动时移除）
+
+# =========================
+# USB
+# =========================
+# -usb
+# -device usb-tablet
+# -device usb-host,vendorid=0x0e8d,productid=0x201c
+# lsusb  # 查看 vendor / product ID
+
+# =========================
+# 图形 / 无图形
+# =========================
+# -display gtk
+# -display sdl
+# -display none
+# -nographic
+
+# =========================
+# 后台 / 服务模式
+# =========================
+# -daemonize
+# -monitor none
+# -serial stdio
+
+# =========================
+# 常见组合速记
+# =========================
+# ISO 安装系统：
+#   -cdrom xxx.iso
+#   -boot order=d
+#
+# 安装完成后日常启动：
+#   注释 -cdrom
+#
+# 实盘 + UEFI：
+#   -drive file=/dev/sda,format=raw
+#   -bios OVMF.fd
+#
+# 服务器模式：
+#   -nographic
+#   -serial mon:stdio
+#
+# USB 调试：
+#   -usb
+#   -device usb-host,...
+
+# =========================
+# 可视化前端管理工具（类似 VirtualBox）
+# =========================
+
+# 1) virt-manager（最常见 GUI 管理器）
+# 安装：
+# sudo apt update
+# sudo apt install virt-manager libvirt-daemon-system libvirt-clie nt
+# 启动 libvirt 守护进程：
+# sudo systemctl enable --now libvirtd
+# 运行 virt-manager 界面：
+# virt-manager
+
+# 2) GNOME Boxes（更轻量、更像现代 VirtualBox UI）
+# sudo apt install gnome-boxes
+
+# 3) Cockpit（基于 Web 的服务器控制台 + 虚拟机管理）
+# 安装 Web 控制台：
+# sudo apt install cockpit cockpit-machines
+# sudo systemctl enable --now cockpit.socket
+# 在浏览器访问：
+#   https://<HOST_IP>:9090/
+
+# 4) Kimchi（Web VM 管理）
+# 安装过程可查官方文档（Web 页面前端管理 KVM）
+# （相对不如上面几种常用）
+
+# 说明：
+# - virt-manager 和 GNOME Boxes 是桌面 GUI
+# - Cockpit / Kimchi 是 Web UI，可远程访问
+# - 底层使用 libvirt 管理 QEMU/KVM 虚拟机
+
