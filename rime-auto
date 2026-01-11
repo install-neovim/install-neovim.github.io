@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -e
 
-# ===== 基本变量 =====
+# ==================================================
+# Rime 雾凇输入法（rime-ice）全自动配置脚本
+# 支持 ibus / fcitx5
+# ==================================================
+
 RIME_REPO_URL="https://github.com/iDvel/rime-ice.git"
 RIME_REPO_DIR="$HOME/Rime"
 
 FCITX5_THEME_REPO_URL="https://github.com/thep0y/fcitx5-themes-candlelight.git"
 FCITX5_THEME_REPO_DIR="$HOME/fcitx5-themes-candlelight"
 FCITX5_THEME_DIR="$HOME/.local/share/fcitx5/themes"
+DEFAULT_FCITX5_THEME="macOS-dark"
 
 echo "=============================================="
 echo "   Rime 雾凇输入法 (rime-ice) 一键配置脚本"
@@ -16,19 +21,73 @@ echo
 echo "请选择你正在使用的输入法框架："
 echo
 echo "  1) ibus + ibus-rime"
-echo "  2) fcitx5 + fcitx5-rime （含主题安装）"
+echo "  2) fcitx5 + fcitx5-rime（推荐，含主题）"
 echo
 read -rp "请输入选项 [1/2] 后回车: " CHOICE
 echo
+
+# ===== 发行版检测 =====
+detect_pkg_mgr() {
+  if command -v apt >/dev/null; then
+    PKG_MGR="apt"
+  elif command -v pacman >/dev/null; then
+    PKG_MGR="pacman"
+  elif command -v dnf >/dev/null; then
+    PKG_MGR="dnf"
+  else
+    PKG_MGR="unknown"
+  fi
+}
+
+install_pkgs() {
+  case "$PKG_MGR" in
+  apt) sudo apt update && sudo apt install -y "$@" ;;
+  pacman) sudo pacman -Sy --noconfirm "$@" ;;
+  dnf) sudo dnf install -y "$@" ;;
+  *)
+    echo "❌ 无法识别包管理器，请手动安装：$*"
+    ;;
+  esac
+}
+
+remove_pkgs() {
+  case "$PKG_MGR" in
+  apt) sudo apt purge -y "$@" ;;
+  pacman) sudo pacman -Rns --noconfirm "$@" ;;
+  dnf) sudo dnf remove -y "$@" ;;
+  *)
+    echo "⚠ 请手动卸载：$*"
+    ;;
+  esac
+}
+
+detect_pkg_mgr
 
 case "$CHOICE" in
 1)
   FRAMEWORK="ibus"
   RIME_DIR="$HOME/.config/ibus/rime"
+
+  echo "==> 安装 ibus + ibus-rime"
+  install_pkgs ibus ibus-rime
+
+  echo "==> 卸载 fcitx / fcitx5"
+  remove_pkgs fcitx fcitx5 fcitx5-rime || true
   ;;
 2)
   FRAMEWORK="fcitx5"
   RIME_DIR="$HOME/.local/share/fcitx5/rime"
+
+  echo "==> 安装 fcitx5 + fcitx5-rime"
+  install_pkgs \
+    fcitx5 \
+    fcitx5-rime \
+    fcitx5-configtool \
+    fcitx5-gtk \
+    fcitx5-qt
+
+  echo "==> 卸载 ibus / fcitx"
+  remove_pkgs ibus ibus-rime fcitx || true
   ;;
 *)
   echo "❌ 无效选择，退出"
@@ -36,6 +95,7 @@ case "$CHOICE" in
   ;;
 esac
 
+echo
 echo "==> 选择输入法框架: $FRAMEWORK"
 echo "==> Rime 配置目录: $RIME_DIR"
 echo
@@ -60,7 +120,7 @@ if [ -f "$DEFAULT_YAML" ]; then
   sed -i 's/Shift_R: noop/Shift_R: commit_code/' "$DEFAULT_YAML"
 fi
 
-# ===== fcitx5 主题配置 =====
+# ===== fcitx5 主题自动配置 =====
 if [ "$FRAMEWORK" = "fcitx5" ]; then
   echo
   echo "==> 配置 fcitx5 主题（candlelight）"
@@ -68,18 +128,27 @@ if [ "$FRAMEWORK" = "fcitx5" ]; then
   mkdir -p "$FCITX5_THEME_DIR"
 
   if [ ! -d "$FCITX5_THEME_REPO_DIR/.git" ]; then
-    echo "==> 克隆 fcitx5-themes-candlelight"
     git clone "$FCITX5_THEME_REPO_URL" "$FCITX5_THEME_REPO_DIR"
   else
-    echo "==> 更新 fcitx5-themes-candlelight"
     git -C "$FCITX5_THEME_REPO_DIR" pull
   fi
 
-  echo "==> 可用主题："
-  ls "$FCITX5_THEME_REPO_DIR"
-  echo
-  echo "⚠️  请手动选择一个主题名称，并按说明复制，例如："
-  echo "    cp -r $FCITX5_THEME_REPO_DIR/spring $FCITX5_THEME_DIR/"
+  echo "==> 安装默认主题: $DEFAULT_FCITX5_THEME"
+  rm -rf "$FCITX5_THEME_DIR/$DEFAULT_FCITX5_THEME"
+  cp -r "$FCITX5_THEME_REPO_DIR/$DEFAULT_FCITX5_THEME" "$FCITX5_THEME_DIR/"
+
+  mkdir -p "$HOME/.config/fcitx5/conf"
+
+  cat >"$HOME/.config/fcitx5/conf/classicui.conf" <<EOF
+Vertical Candidate List=False
+PerScreenDPI=True
+Font="Smartisan Compact CNS 13"
+Theme=$DEFAULT_FCITX5_THEME
+EOF
+
+  cat >"$HOME/.config/fcitx5/conf/rime.conf" <<EOF
+PreeditInApplication=True
+EOF
 fi
 
 # ===== 重启输入法 =====
@@ -88,55 +157,55 @@ echo "==> 重启输入法框架"
 if [ "$FRAMEWORK" = "ibus" ]; then
   ibus-daemon -drx
 else
-  fcitx5 -r
+  fcitx5 -r || fcitx5 &
 fi
 
-# ===== 后续微调说明 =====
-if [ "$FRAMEWORK" = "fcitx5" ]; then
-  cat <<'EOF'
+# ===== 后续说明 =====
+cat <<'EOF'
 
 ==================================================
-fcitx5 可选微调配置说明（手动）
+输入法自启动设置提醒（非常重要）
 ==================================================
 
-1️⃣ 启用主题（classic UI）：
-编辑：
+【fcitx5】
+1) 确认环境变量：
+   GTK_IM_MODULE=fcitx
+   QT_IM_MODULE=fcitx
+   XMODIFIERS=@im=fcitx
+
+2) systemd 用户服务：
+   systemctl --user enable fcitx5
+   systemctl --user start fcitx5
+
+3) 桌面环境：
+   设置 → 启动应用 → 添加 fcitx5
+
+--------------------------------------------------
+
+【ibus】
+1) 设置为默认输入法：
+   im-config -n ibus
+
+2) 启动：
+   ibus-daemon -drx
+
+--------------------------------------------------
+
+【fcitx5 主题修改说明（已自动设置 macOS-dark）】
+
+配置文件：
   ~/.config/fcitx5/conf/classicui.conf
 
-添加或修改（示例）：
-  Vertical Candidate List=False
-  PerScreenDPI=True
-  Font="Smartisan Compact CNS 13"
-  Theme=<theme-name>
-
-其中 <theme-name> 替换为你复制的主题名，如：
+可选主题：
   spring / summer / autumn / winter
   green / transparent-green
   macOS-light / macOS-dark
 
---------------------------------------------------
-
-2️⃣ fcitx5-rime 单行模式（应用内预编辑）：
-编辑：
-  ~/.config/fcitx5/conf/rime.conf
-
-添加：
-  PreeditInApplication=True
-
---------------------------------------------------
-
-3️⃣ 单行 / 双行模式快捷键切换：
-  Ctrl + Alt + P
-
---------------------------------------------------
-
-4️⃣ 应用修改：
-  重启 fcitx5：
-    fcitx5 -r
+修改后执行：
+  fcitx5 -r
 
 ==================================================
 
 EOF
-fi
 
-echo "✅ 配置完成"
+echo "✅ Rime 雾凇输入法配置完成"
