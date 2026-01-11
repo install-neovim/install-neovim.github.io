@@ -26,15 +26,16 @@ sudo -E qemu-system-x86_64 \
   \
   -bios /usr/share/ovmf/OVMF.fd \
   \
-  -usb \
-  -device usb-tablet \
-  -device usb-host,vendorid=0x0e8d,productid=0x201c \
-  \
   -vga virtio \
   -display gtk \
   \
   -monitor stdio \
-  -serial mon:stdio
+  -serial mon:stdio \
+  \
+  -usb \
+  -device usb-tablet \
+  -device usb-host,vendorid=0x0e8d,productid=0x201c
+# -device usb-host,bus=1,addr=5 \
 
 # =========================
 # 安装
@@ -80,10 +81,28 @@ sudo -E qemu-system-x86_64 \
 # =========================
 # USB
 # =========================
+# 启用 USB 支持
 # -usb
-# -device usb-tablet
+
+# 方式 1：通过 Vendor / Product ID（推荐，稳定）
 # -device usb-host,vendorid=0x0e8d,productid=0x201c
-# lsusb  # 查看 vendor / product ID
+
+# 方式 2：通过 Bus / Device Address（临时 / 调试用）
+# -device usb-host,bus=1,addr=5
+
+# 查看 USB 设备信息：
+# lsusb
+# 示例输出：
+#   Bus 001 Device 005: ID 0e8d:201c MediaTek Inc.
+
+# 对应关系：
+#   Bus    -> bus=1
+#   Device -> addr=5
+
+# ⚠️ 注意事项：
+# - bus/addr 会随设备重新插拔而改变
+# - vendor/product 更稳定，推荐长期使用
+# - 两种方式不要同时对同一设备使用
 
 # =========================
 # 图形 / 无图形
