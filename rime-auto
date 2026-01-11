@@ -81,10 +81,7 @@ case "$CHOICE" in
   echo "==> 安装 fcitx5 + fcitx5-rime"
   install_pkgs \
     fcitx5 \
-    fcitx5-rime \
-    fcitx5-configtool \
-    fcitx5-gtk \
-    fcitx5-qt
+    fcitx5-rime
 
   echo "==> 卸载 ibus / fcitx"
   remove_pkgs ibus ibus-rime fcitx || true
