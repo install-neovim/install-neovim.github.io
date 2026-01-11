@@ -35,7 +35,8 @@ sudo -E qemu-system-x86_64 \
   -usb \
   -device usb-tablet \
   -device usb-host,vendorid=0x0e8d,productid=0x201c
-# -device usb-host,bus=1,addr=5 \
+# -device qemu-xhci,id=xhci \
+# -device usb-host,hostbus=1,hostport=1.3 \
 
 # =========================
 # 安装
@@ -81,28 +82,58 @@ sudo -E qemu-system-x86_64 \
 # =========================
 # USB
 # =========================
+
 # 启用 USB 支持
 # -usb
 
-# 方式 1：通过 Vendor / Product ID（推荐，稳定）
+# =====================================================
+# 方式 A（推荐）：Vendor / Product ID
+# =====================================================
+# 稳定，最常用，适合长期固定设备
 # -device usb-host,vendorid=0x0e8d,productid=0x201c
 
-# 方式 2：通过 Bus / Device Address（临时 / 调试用）
-# -device usb-host,bus=1,addr=5
-
-# 查看 USB 设备信息：
+# 查看设备 ID：
 # lsusb
+# 示例：
+# Bus 001 Device 104: ID 0e8d:201c MediaTek Inc.
+
+# =====================================================
+# 方式 B（最稳）：hostbus / hostport（物理拓扑绑定）
+# =====================================================
+# 适合：
+# - 同型号 USB 设备很多
+# - 必须绑定某一个物理 USB 口
+# - USB Wi-Fi / SDR / Dongle 等
+
+# ---------- 方法 1：通过 sysfs 查找 ----------
+# realpath /sys/bus/usb/devices/1-*
+#
 # 示例输出：
-#   Bus 001 Device 005: ID 0e8d:201c MediaTek Inc.
+# /sys/bus/usb/devices/1-1.3 -> ...
+#
+# 得到端口路径：1-1.3
+#
+# QEMU 参数：
+# -device qemu-xhci,id=xhci
+# -device usb-host,hostbus=1,hostport=1.3
 
-# 对应关系：
-#   Bus    -> bus=1
-#   Device -> addr=5
-
-# ⚠️ 注意事项：
-# - bus/addr 会随设备重新插拔而改变
-# - vendor/product 更稳定，推荐长期使用
-# - 两种方式不要同时对同一设备使用
+# ---------- 方法 2：通过 udevadm（推荐，信息最全） ----------
+# 1) 先找到设备节点（如 /dev/bus/usb/001/104）
+# lsusb
+#
+# 2) 查询 udev 信息：
+# udevadm info -q path -n /dev/bus/usb/001/104
+#
+# 示例输出：
+# /devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1.3
+#
+# 其中：
+#   usb1        -> hostbus=1
+#   1-1.3       -> hostport=1.3
+#
+# 3) 写入 QEMU：
+# -device qemu-xhci,id=xhci
+# -device usb-host,hostbus=1,hostport=1.3
 
 # =========================
 # 图形 / 无图形
