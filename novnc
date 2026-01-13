@@ -300,7 +300,10 @@ echo "   https://$SERVER_IP:$NOVNC_PORT/vnc.html"
 echo ""
 echo "Notes:"
 echo "   - First access will show certificate warning, click continue"
-echo "   - VNC password is saved, to change run: x11vnc -storepasswd"
+echo "   - VNC password is saved, to change run: "
+echo "      - $CONFIG_DIR/stop_x11vnc.sh"
+echo "      - x11vnc -storepasswd"
+echo "      - $CONFIG_DIR/start_x11vnc.sh"
 echo "   - Certificate and scripts are in secure directory, not exposed via web"
 
 # Ask to start noVNC service
