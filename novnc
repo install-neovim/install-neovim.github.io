@@ -11,18 +11,18 @@ echo "Starting x11vnc + noVNC configuration..."
 echo "Checking user privileges..."
 HAS_SUDO=false
 if sudo -n true 2>/dev/null; then
-    HAS_SUDO=true
-    echo "Current user has sudo privileges"
+  HAS_SUDO=true
+  echo "Current user has sudo privileges"
 else
-    echo "Current user does not have sudo privileges or needs password"
-    read -p "Do you have sudo privileges? (y/N): " SUDO_CONFIRM
-    if [[ "$SUDO_CONFIRM" =~ ^[Yy]$ ]]; then
-        HAS_SUDO=true
-        echo "Will attempt to use sudo for privileged operations"
-    else
-        HAS_SUDO=false
-        echo "Will run in non-privileged mode, skipping steps requiring sudo"
-    fi
+  echo "Current user does not have sudo privileges or needs password"
+  read -p "Do you have sudo privileges? (y/N): " SUDO_CONFIRM
+  if [[ "$SUDO_CONFIRM" =~ ^[Yy]$ ]]; then
+    HAS_SUDO=true
+    echo "Will attempt to use sudo for privileged operations"
+  else
+    HAS_SUDO=false
+    echo "Will run in non-privileged mode, skipping steps requiring sudo"
+  fi
 fi
 
 # Default configuration variables
@@ -258,6 +258,9 @@ echo "VNC service started!"
 echo "Access URL: https://\$(hostname -I | awk '{print \$1}'):$NOVNC_PORT/vnc.html"
 echo "VNC password: Use the previously set password"
 EOF
+
+echo "10. Creating empty index.html file to prevent path info being leaked..."
+echo "" >"$CONFIG_DIR/index.html"
 
 chmod +x "$CONFIG_DIR/start_vnc_service.sh"
 
