@@ -1,0 +1,168 @@
+#!/bin/bash
+# Xray VLESS + REALITY 一键安装脚本 (含客户端配置生成)
+
+set -e
+
+# --- 颜色定义 ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+PLAIN='\033[0m'
+
+# 获取本机公网 IP
+SERVER_IP=$(curl -s https://api.ipify.org || echo "你的服务器IP")
+
+echo -e "${BLUE}开始安装 Xray VLESS + REALITY...${PLAIN}"
+
+# 1. 更新系统
+echo -e "${GREEN}正在更新系统软件包...${PLAIN}"
+sudo apt update && sudo apt upgrade -y
+
+# 2. 安装 Xray
+echo -e "${GREEN}正在下载并安装 Xray 官方脚本...${PLAIN}"
+bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh) install
+
+# 3. 生成配置所需参数
+echo -e "${GREEN}正在生成密钥对和 UUID...${PLAIN}"
+# 修正：部分版本 xray 路径可能不同，这里直接调用 xray
+KEYS=$(xray x25519)
+PRIVATE_KEY=$(echo "$KEYS" | grep "Private key" | awk '{print $3}')
+PUBLIC_KEY=$(echo "$KEYS" | grep "Public key" | awk '{print $3}')
+UUID=$(cat /proc/sys/kernel/random/uuid)
+DEST_DOMAIN="www.apple.com"
+
+# 4. 写入服务端配置文件
+echo -e "${GREEN}正在配置服务端 /usr/local/etc/xray/config.json...${PLAIN}"
+cat <<EOF > /usr/local/etc/xray/config.json
+{
+  "log": {
+    "loglevel": "warning",
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log"
+  },
+  "inbounds": [
+    {
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "$UUID",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "$DEST_DOMAIN:443",
+          "serverNames": ["$DEST_DOMAIN"],
+          "privateKey": "$PRIVATE_KEY",
+          "shortIds": [""]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom", "settings": {} },
+    { "tag": "block", "protocol": "blackhole", "settings": {} }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      { "type": "field", "ip": ["geoip:private"], "outboundTag": "block" },
+      { "type": "field", "ip": ["geoip:cn"], "outboundTag": "block" }
+    ]
+  }
+}
+EOF
+
+# 5. 生成客户端配置文件 (client_config.json)
+echo -e "${GREEN}正在当前目录生成客户端配置文件 client_config.json...${PLAIN}"
+cat <<EOF > ./client_config.json
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": { "udp": true },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "$SERVER_IP",
+            "port": 443,
+            "users": [
+              {
+                "id": "$UUID",
+                "flow": "xtls-rprx-vision",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "$DEST_DOMAIN",
+          "publicKey": "$PUBLIC_KEY",
+          "shortId": ""
+        }
+      }
+    },
+    { "tag": "direct", "protocol": "freedom", "settings": {} },
+    { "tag": "block", "protocol": "blackhole", "settings": {} }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+        { "type": "field", "domain": ["geosite:category-ads-all"], "outboundTag": "block" },
+        { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" },
+        { "type": "field", "ip": ["geoip:cn"], "outboundTag": "direct" },
+        { "type": "field", "domain": ["geosite:cn"], "outboundTag": "direct" },
+        { "type": "field", "outboundTag": "proxy", "network": "udp,tcp" }
+    ]
+  }
+}
+EOF
+
+# 6. 设置权限并启动服务
+echo -e "${GREEN}正在启动 Xray 服务...${PLAIN}"
+sudo systemctl enable xray
+sudo systemctl restart xray
+
+# 7. 配置防火墙
+if command -v ufw > /dev/null; then
+    echo -e "${GREEN}正在配置防火墙 (UFW)...${PLAIN}"
+    sudo ufw allow 22/tcp
+    sudo ufw allow 443/tcp
+    echo "y" | sudo ufw enable
+fi
+
+# 8. 输出结果
+clear
+echo -e "${BLUE}======================================${PLAIN}"
+echo -e "${GREEN}  Xray VLESS + REALITY 安装完成！${PLAIN}"
+echo -e "${BLUE}======================================${PLAIN}"
+echo -e "UUID:         ${RED}$UUID${PLAIN}"
+echo -e "Public Key:   ${RED}$PUBLIC_KEY${PLAIN}"
+echo -e "Server IP:    ${RED}$SERVER_IP${PLAIN}"
+echo -e "${BLUE}======================================${PLAIN}"
+echo -e "客户端配置已保存至: ${GREEN}$(pwd)/client_config.json${PLAIN}"
+echo -e "你可以通过 cat client_config.json 查看内容并复制。"
