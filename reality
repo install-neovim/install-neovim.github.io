@@ -1,5 +1,5 @@
 #!/bin/bash
-# Xray VLESS + REALITY 一键安装脚本 (含客户端配置生成)
+# Xray VLESS + REALITY 一键安装脚本 (针对特定输出格式修复版)
 
 set -e
 
@@ -24,16 +24,28 @@ bash <(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)
 
 # 3. 生成配置所需参数
 echo -e "${GREEN}正在生成密钥对和 UUID...${PLAIN}"
-# 修正：部分版本 xray 路径可能不同，这里直接调用 xray
-KEYS=$(xray x25519)
-PRIVATE_KEY=$(echo "$KEYS" | grep "Private key" | awk '{print $3}')
-PUBLIC_KEY=$(echo "$KEYS" | grep "Public key" | awk '{print $3}')
+
+XRAY_BIN="/usr/local/bin/xray"
+# 生成密钥
+KEYS=$($XRAY_BIN x25519)
+
+# --- 核心修复：根据你提供的格式提取 ---
+# 格式: PrivateKey: XXX Password: YYY Hash32: ZZZ
+PRIVATE_KEY=$(echo "$KEYS" | awk -F'PrivateKey: ' '{print $2}' | awk '{print $1}')
+PUBLIC_KEY=$(echo "$KEYS" | awk -F'Password: ' '{print $2}' | awk '{print $1}')
 UUID=$(cat /proc/sys/kernel/random/uuid)
 DEST_DOMAIN="www.apple.com"
 
+# 检查是否提取成功
+if [ -z "$PRIVATE_KEY" ] || [ -z "$PUBLIC_KEY" ]; then
+  echo -e "${RED}错误: 无法解析密钥串！${PLAIN}"
+  echo -e "原始输出为: $KEYS"
+  exit 1
+fi
+
 # 4. 写入服务端配置文件
-echo -e "${GREEN}正在配置服务端 /usr/local/etc/xray/config.json...${PLAIN}"
-cat <<EOF > /usr/local/etc/xray/config.json
+echo -e "${GREEN}正在配置服务端 config.json...${PLAIN}"
+cat <<EOF >/usr/local/etc/xray/config.json
 {
   "log": {
     "loglevel": "warning",
@@ -84,8 +96,8 @@ cat <<EOF > /usr/local/etc/xray/config.json
 EOF
 
 # 5. 生成客户端配置文件 (client_config.json)
-echo -e "${GREEN}正在当前目录生成客户端配置文件 client_config.json...${PLAIN}"
-cat <<EOF > ./client_config.json
+echo -e "${GREEN}正在生成客户端配置文件...${PLAIN}"
+cat <<EOF >./client_config.json
 {
   "log": { "loglevel": "warning" },
   "inbounds": [
@@ -126,43 +138,23 @@ cat <<EOF > ./client_config.json
         }
       }
     },
-    { "tag": "direct", "protocol": "freedom", "settings": {} },
-    { "tag": "block", "protocol": "blackhole", "settings": {} }
-  ],
-  "routing": {
-    "domainStrategy": "IPIfNonMatch",
-    "rules": [
-        { "type": "field", "domain": ["geosite:category-ads-all"], "outboundTag": "block" },
-        { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" },
-        { "type": "field", "ip": ["geoip:cn"], "outboundTag": "direct" },
-        { "type": "field", "domain": ["geosite:cn"], "outboundTag": "direct" },
-        { "type": "field", "outboundTag": "proxy", "network": "udp,tcp" }
-    ]
-  }
+    { "tag": "direct", "protocol": "freedom", "settings": {} }
+  ]
 }
 EOF
 
-# 6. 设置权限并启动服务
-echo -e "${GREEN}正在启动 Xray 服务...${PLAIN}"
+# 6. 重启服务
 sudo systemctl enable xray
 sudo systemctl restart xray
 
-# 7. 配置防火墙
-if command -v ufw > /dev/null; then
-    echo -e "${GREEN}正在配置防火墙 (UFW)...${PLAIN}"
-    sudo ufw allow 22/tcp
-    sudo ufw allow 443/tcp
-    echo "y" | sudo ufw enable
-fi
-
-# 8. 输出结果
+# 7. 最终展示
 clear
 echo -e "${BLUE}======================================${PLAIN}"
-echo -e "${GREEN}  Xray VLESS + REALITY 安装完成！${PLAIN}"
+echo -e "${GREEN}  Xray 安装成功 (密钥提取已修复)！${PLAIN}"
 echo -e "${BLUE}======================================${PLAIN}"
+echo -e "Server IP:    ${RED}$SERVER_IP${PLAIN}"
 echo -e "UUID:         ${RED}$UUID${PLAIN}"
 echo -e "Public Key:   ${RED}$PUBLIC_KEY${PLAIN}"
-echo -e "Server IP:    ${RED}$SERVER_IP${PLAIN}"
+echo -e "Private Key:  $PRIVATE_KEY"
 echo -e "${BLUE}======================================${PLAIN}"
-echo -e "客户端配置已保存至: ${GREEN}$(pwd)/client_config.json${PLAIN}"
-echo -e "你可以通过 cat client_config.json 查看内容并复制。"
+echo -e "客户端配置已保存到: ${GREEN}$(pwd)/client_config.json${PLAIN}"
