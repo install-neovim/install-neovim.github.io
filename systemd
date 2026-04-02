@@ -1,0 +1,22 @@
+[Unit]
+# 服务配置文件样例
+# 将该文件置于 /etc/systemd/system/[service-name].service
+Description=My Python Web Server
+After=network.target
+
+[Service]
+# 指定运行用户
+User=www-data
+# 指定工作目录，脚本里的相对路径会以此为准
+WorkingDirectory=/home/pi
+# 启动命令（必须是绝对路径）
+ExecStart=/usr/bin/python3 /home/pi/web_server.py
+# 如果程序崩溃，5秒后自动重启
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+# 绑定到多用户模式
+WantedBy=multi-user.target
+
+
