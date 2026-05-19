@@ -1,5 +1,5 @@
 #!/bin/bash
-# Xray VLESS + REALITY 一键安装脚本 (针对特定输出格式修复版)
+# Xray VLESS + REALITY 一键安装脚本 (终极完美兼容版)
 
 set -e
 
@@ -29,17 +29,16 @@ XRAY_BIN="/usr/local/bin/xray"
 # 生成密钥
 KEYS=$($XRAY_BIN x25519)
 
-# --- 核心修复：根据你提供的格式提取 ---
-# 格式: PrivateKey: XXX Password: YYY Hash32: ZZZ
-PRIVATE_KEY=$(echo "$KEYS" | awk -F'PrivateKey: ' '{print $2}' | awk '{print $1}')
-PUBLIC_KEY=$(echo "$KEYS" | awk -F'Password: ' '{print $2}' | awk '{print $1}')
+# --- 核心修复：全格式完美兼容方案 (支持单行、多行、新老版本提示语) ---
+PRIVATE_KEY=$(echo "$KEYS" | grep -oP '(?i)private\s*key?:\s*\K\S+')
+PUBLIC_KEY=$(echo "$KEYS" | grep -oP '(?i)(public\s*key|password)(\s*\(publickey\))?:\s*\K\S+')
 UUID=$(cat /proc/sys/kernel/random/uuid)
 DEST_DOMAIN="www.apple.com"
 
 # 检查是否提取成功
 if [ -z "$PRIVATE_KEY" ] || [ -z "$PUBLIC_KEY" ]; then
   echo -e "${RED}错误: 无法解析密钥串！${PLAIN}"
-  echo -e "原始输出为: $KEYS"
+  echo -e "原始输出为:\n$KEYS"
   exit 1
 fi
 
@@ -150,7 +149,7 @@ sudo systemctl restart xray
 # 7. 最终展示
 clear
 echo -e "${BLUE}======================================${PLAIN}"
-echo -e "${GREEN}  Xray 安装成功 (密钥提取已修复)！${PLAIN}"
+echo -e "${GREEN}  Xray 安装成功 (全格式完美兼容版)！${PLAIN}"
 echo -e "${BLUE}======================================${PLAIN}"
 echo -e "Server IP:    ${RED}$SERVER_IP${PLAIN}"
 echo -e "UUID:         ${RED}$UUID${PLAIN}"
