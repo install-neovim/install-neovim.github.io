@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# 1. 检查是否以 root 权限运行
+if [ "$EUID" -ne 0 ]; then
+  echo "错误：请使用 root 权限 (sudo) 运行此脚本。"
+  exit 1
+fi
+
+echo "========== 1. 更新系统软件包 =========="
+apt-get update
+
+echo "========== 2. 安装桌面、XRDP及所有排错依赖 =========="
+# xfce4 及增强包：桌面环境
+# xrdp, ssl-cert：远程服务及证书读取权限管理
+# xserver-xorg-core, xorgxrdp：XRDP 底层 X 渲染桥接 (解决找不到 display 的问题)
+# dbus-x11：进程间通信框架 (解决 root 启动桌面时无法分配 dbus 会话总线导致瞬间自毁)
+# mesa-utils, libglx-mesa0, libgl1-mesa-dri：Mesa 渲染基础库 (解决无 GPU 云主机的 llvmpipe 软件渲染崩溃问题)
+apt-get install -y xfce4 xfce4-goodies xrdp ssl-cert \
+  xserver-xorg-core xorgxrdp dbus-x11 \
+  mesa-utils libglx-mesa0 libgl1-mesa-dri
+
+echo "========== 3. 解除 X 服务器启动权限限制 =========="
+# 允许任何用户启动 X 服务器 (解决 Debian 默认只允许物理控制台用户启动桌面的安全策略)
+echo "allowed_users=anybody" >/etc/X11/Xwrapper.config
+
+echo "========== 4. 配置 XRDP 会话脚本 (startwm.sh) =========="
+# 备份默认的启动脚本
+cp /etc/xrdp/startwm.sh /etc/xrdp/startwm.sh.bak
+
+# 4.1 在原版脚本第二行插入必要的环境变量修复 (清理 DBUS 冲突并强制使用纯软件渲染)
+sed -i '2i unset DBUS_SESSION_BUS_ADDRESS\nunset XDG_RUNTIME_DIR\nexport LIBGL_ALWAYS_SOFTWARE=1\n' /etc/xrdp/startwm.sh
+
+# 4.2 注释掉默认的 Xsession 兜底逻辑，强制指向 startxfce4
+sed -i 's/^test -x \/etc\/X11\/Xsession/#test -x \/etc\/X11\/Xsession/g' /etc/xrdp/startwm.sh
+sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#exec \/bin\/sh \/etc\/X11\/Xsession/g' /etc/xrdp/startwm.sh
+if ! grep -q "startxfce4" /etc/xrdp/startwm.sh; then
+  echo "startxfce4" >>/etc/xrdp/startwm.sh
+fi
+
+# ==============================================================================
+# 【可选项：极简版 startwm.sh 备用方案】
+# 默认的 startwm.sh 会执行 /etc/X11/Xsession.d/ 下的标准初始化流程（加载环境变量、输入法等）。
+# 如果遇到未知冲突导致闪退，你可以手动将 /etc/xrdp/startwm.sh 替换为以下极简代码。
+# 极简版去除了所有外围组件，纯净且强制拉起桌面：
+#
+# cat > /etc/xrdp/startwm.sh << "EOF"
+# #!/bin/sh
+# if [ -r /etc/default/locale ]; then
+#   . /etc/default/locale
+#   export LANG LANGUAGE
+# fi
+# unset DBUS_SESSION_BUS_ADDRESS
+# unset XDG_RUNTIME_DIR
+# export LIBGL_ALWAYS_SOFTWARE=1
+# exec dbus-launch --exit-with-session startxfce4
+# EOF
+# ==============================================================================
+
+echo "========== 5. 强制指定用户级会话配置 =========="
+# 为新创建的用户设置默认会话
+echo "xfce4-session" >/etc/skel/.xsession
+# 为当前执行脚本的用户（通常是 root）设置默认会话
+echo "xfce4-session" >~/.xsession
+
+echo "========== 6. 配置 XRDP 强制使用 TLS 加密 =========="
+cp /etc/xrdp/xrdp.ini /etc/xrdp/xrdp.ini.bak
+# 将安全层强制设置为 tls (默认是 negotiate)
+sed -i 's/^security_layer=.*/security_layer=tls/g' /etc/xrdp/xrdp.ini
+# 禁用旧版 RDP 加密以提升安全性
+sed -i 's/^crypt_level=.*/crypt_level=high/g' /etc/xrdp/xrdp.ini
+
+echo "========== 7. 配置证书权限 =========="
+# 将 xrdp 用户加入 ssl-cert 组，使其有权限读取 /etc/ssl/private/ 下的自签名私钥
+adduser xrdp ssl-cert
+
+echo "========== 8. 重启并清理环境 =========="
+# 强制杀掉可能存在的僵尸 Xorg 进程并清理旧的锁文件，防止 display 端口被占死
+killall Xorg 2>/dev/null
+rm -rf /tmp/.X*
+
+# 重启网络服务与会话管理服务
+systemctl restart xrdp xrdp-sesman
+systemctl enable xrdp
+
+echo "========== 安装与配置全部完成！ =========="
+echo "XRDP 现已运行，底层环境已修复，并强制使用 TLS 加密。"
+echo "客户端连接警告：请勿使用 /bpp:8 色深或强制硬件加速参数。"
+echo "推荐连接命令：xfreerdp3 /v:<服务器IP>:3389 /u:root /p:<密码> /bpp:24 +compression -wallpaper -themes /network:modem /sec:tls"
+
+# 检查证书
+openssl x509 -in /etc/xrdp/cert.pem -noout -fingerprint -sha256
