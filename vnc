@@ -1,0 +1,114 @@
+#!/bin/bash
+
+# ==========================================
+# TigerVNC 自動化安全配置腳本 (主機名修復與剪貼簿支援版)
+# ==========================================
+
+# 1. 檢查是否帶有 IP 或網域參數
+if [ -z "$1" ]; then
+    echo "錯誤: 缺少位址參數。"
+    echo "用法: sudo bash vnc_setup.sh <你的伺服器IP或網域>"
+    exit 1
+fi
+ADDRESS=$1
+
+# 2. 檢查是否具有 root 權限
+if [ "$EUID" -ne 0 ]; then
+    echo "錯誤: 此腳本需要修改系統認證檔與安裝套件，請使用 sudo 執行。"
+    exit 1
+fi
+
+echo "========== 1. 系統環境準備與套件安裝 =========="
+# 自動將當前 hostname 加入 /etc/hosts，解決解析報錯與延遲
+CURRENT_HOSTNAME=$(hostname)
+if ! grep -q -w "$CURRENT_HOSTNAME" /etc/hosts; then
+    echo "127.0.1.1 $CURRENT_HOSTNAME" >> /etc/hosts
+    echo "已將主機名稱 $CURRENT_HOSTNAME 補齊至 /etc/hosts。"
+else
+    echo "主機名稱 $CURRENT_HOSTNAME 已存在於 /etc/hosts，跳過。"
+fi
+
+apt-get update
+apt-get install -y tigervnc-standalone-server xfce4 xfce4-goodies openssl
+echo "系統軟體包安裝完成。"
+
+
+echo "========== 2. 配置 PAM 系統帳號認證 =========="
+cat > /etc/pam.d/tigervnc << 'EOF'
+@include common-auth
+@include common-account
+@include common-session
+EOF
+echo "PAM 認證模組配置完成 (/etc/pam.d/tigervnc)。"
+
+
+echo "========== 3. 生成自簽名 X509 加密證書 =========="
+mkdir -p vnc_keys
+rm -f vnc_keys/vnc-server-private.pem vnc_keys/vnc-server.pem
+
+cd vnc_keys
+openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+    -keyout vnc-server-private.pem \
+    -out vnc-server.pem \
+    -subj "/C=CN/ST=State/L=City/O=Organization/CN=${ADDRESS}"
+cd ..
+
+if [ ! -f "vnc_keys/vnc-server.pem" ]; then
+    echo "錯誤: 憑證生成失敗，請檢查上方 OpenSSL 報錯訊息。"
+    exit 1
+fi
+echo "證書已成功生成至 ./vnc_keys 目錄下。"
+
+
+echo "========== 4. 配置 XFCE4 桌面啟動腳本 (xstartup) =========="
+USER_HOME=$(eval echo ~${SUDO_USER:-$USER})
+mkdir -p "${USER_HOME}/.vnc"
+
+# 在啟動 XFCE4 之前，加入 vncconfig -nowin & 以啟用剪貼簿共享
+cat > "${USER_HOME}/.vnc/xstartup" << 'EOF'
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
+# 啟動剪貼簿同步服務 (在背景運行，不顯示圖形視窗)
+vncconfig -nowin &
+
+exec startxfce4
+EOF
+chmod +x "${USER_HOME}/.vnc/xstartup"
+echo "桌面環境 xstartup 配置完成 (已啟用剪貼簿共享)！"
+
+
+echo "========== 5. 生成 VNC 服務啟動腳本 =========="
+CURRENT_DIR=$(pwd)
+
+cat > start_my_vnc.sh << EOF
+#!/bin/bash
+
+# 強制重置語言區域，屏蔽 Perl 的 locale 警告
+export LC_ALL=C
+
+# ==========================================
+# [手動修改區] 你可以在這裡添加或修改 VNC 參數
+# ==========================================
+DISPLAY_PORT=":1" 
+RESOLUTION="-geometry 1280x720"
+EXTRA_ARGS=""
+# ==========================================
+
+echo "正在啟動 TigerVNC 服務於端口 \${DISPLAY_PORT}..."
+echo "請在客戶端使用 [系統使用者名稱] 和 [系統密碼] 登入。"
+
+vncserver \${DISPLAY_PORT} \${RESOLUTION} \${EXTRA_ARGS} \\
+    -localhost no \\
+    -SecurityTypes X509Plain \\
+    -PlainUsers \* \\
+    -PAMService tigervnc \\
+    -X509Key "${CURRENT_DIR}/vnc_keys/vnc-server-private.pem" \\
+    -X509Cert "${CURRENT_DIR}/vnc_keys/vnc-server.pem"
+EOF
+
+chmod +x start_my_vnc.sh
+
+echo "========== 全部配置完成！ =========="
+echo "請執行 ./start_my_vnc.sh 來啟動高安全性 VNC 桌面。"
