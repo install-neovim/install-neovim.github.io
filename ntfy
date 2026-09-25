@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================
-# NTFY 报警配置 (V12: 纯内存 + 智能国内备用节点 + 开机监控)
+# NTFY 报警配置 (V14: 纯内存 + 智能节点 + B站/搜狐高隐蔽 IP 提取)
 # ==============================================================
 
 GREEN='\033[0;32m'
@@ -16,7 +16,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo -e "${CYAN}======================================================${NC}"
-echo -e "${CYAN}  服务器登录报警自动化配置 (V12 智能节点备用版)${NC}"
+echo -e "${CYAN}服务器登录报警自动化配置 (V14 终极 IP 提取版)${NC}"
 echo -e "${CYAN}======================================================${NC}"
 echo ""
 
@@ -47,29 +47,24 @@ check_and_install_deps() {
 }
 check_and_install_deps
 
-# ================= V12 新增：三段式智能下载与防错 =================
 install_ntfy_binary() {
   if ! command -v ntfy &>/dev/null; then
     echo -e "${YELLOW}正在动态获取最新版 ntfy 客户端...${NC}"
 
-    # 1. 尝试使用官方 API 获取真实下载链接 (限时 5 秒)
     LATEST_URL=$(curl -s -m 5 https://api.github.com/repos/binwiederhier/ntfy/releases/latest | grep browser_download_url | grep 'linux_amd64\.tar\.gz' | cut -d '"' -f 4)
 
     if [ -n "$LATEST_URL" ]; then
       echo -e "${CYAN}获取链接成功，尝试官方直连下载...${NC}"
-      # 2. 如果官方下载失败或超时，立刻无缝切换到 ghp.ci 国内加速镜像
       if ! wget -qO ntfy.tar.gz "$LATEST_URL"; then
         echo -e "${YELLOW}官方下载受阻，自动切换至国内加速镜像...${NC}"
         wget -qO ntfy.tar.gz "https://ghp.ci/${LATEST_URL}"
       fi
     else
       echo -e "${YELLOW}官方 API 访问受阻，启用国内稳定备用通道...${NC}"
-      # 3. 终极兜底：如果 API 被墙，直接用镜像拉取写死的稳定版本
       FALLBACK_URL="https://ghp.ci/https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_amd64.tar.gz"
       wget -qO ntfy.tar.gz "$FALLBACK_URL"
     fi
 
-    # 安全验证：检查下载下来的包是不是完整的 gzip，防止代理节点返回 404 HTML
     if ! gzip -t ntfy.tar.gz 2>/dev/null; then
       echo -e "${RED}下载失败或文件损坏 (可能是节点异常)，请检查服务器网络。${NC}"
       rm -f ntfy.tar.gz
@@ -85,7 +80,6 @@ install_ntfy_binary() {
     echo -e "${GREEN}ntfy 核心程序安装成功！${NC}"
   fi
 }
-# =================================================================
 
 # 1. 服务端配置 (纯内存 RAM 模式)
 read -p "是否自建 NTFY 消息中转服务端？(纯发送端选 n) [y/N]: " SETUP_SERVER
@@ -124,8 +118,6 @@ fi
 
 # 2. 消息发送端及 OPSEC 信息配置
 echo -e "${CYAN}配置发送端与设备标识...${NC}"
-
-# 【优化提示】：在这里加回了 URL 格式的样例提醒
 read -p "请输入接收 URL (可省略http头，如 ntfy.sh/mytopic): " TARGET_URL
 
 if [[ ! "$TARGET_URL" =~ ^https?:// ]]; then
@@ -139,7 +131,6 @@ fi
 read -p "请为该服务器起一个【自定义代号】(如 QEMU-01, DB-Node 等): " CUSTOM_DEVICE_NAME
 CUSTOM_DEVICE_NAME=${CUSTOM_DEVICE_NAME:-"Unnamed-Node"}
 
-# 3. 架构重构：生成包含全局变量的底层脚本
 echo -e "${YELLOW}正在部署监控与脱敏逻辑...${NC}"
 
 cat <<EOF >/usr/local/bin/login_notify.sh
@@ -152,6 +143,24 @@ CONF_DEVICE="${CUSTOM_DEVICE_NAME}"
 EOF
 
 cat <<'EOF' >>/usr/local/bin/login_notify.sh
+# 核心公共函数: OPSEC 高隐蔽级国内 IP 探测
+get_public_ip() {
+    local ip
+    # 1. 哔哩哔哩前端 API (国内最高优白名单，修改为提取 addr 字段)
+    ip=$(curl -s -m 3 https://api.bilibili.com/x/web-interface/zone 2>/dev/null | grep -o '"addr":"[^"]*"' | cut -d'"' -f4)
+    
+    # 2. 搜狐老牌统计 API (备选国民流量，伪装成普通网页请求)
+    if [ -z "$ip" ]; then
+        ip=$(curl -s -m 3 https://pv.sohu.com/cityjson 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+    fi
+    
+    # 3. Cloudflare (国际备用兜底)
+    if [ -z "$ip" ]; then
+        ip=$(curl -s -m 3 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -E '^ip=' | cut -d= -f2)
+    fi
+    echo "$ip"
+}
+
 # =========================================================
 # 分支 1: 系统开机/重启通知
 # =========================================================
@@ -159,7 +168,7 @@ if [ "$1" = "boot_notify" ]; then
     sleep 10
     
     LOCAL_IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    PUBLIC_IP=$(curl -s -m 3 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -E '^ip=' | cut -d= -f2)
+    PUBLIC_IP=$(get_public_ip)
 
     PUB_LAST=$(echo "$PUBLIC_IP" | awk -F. '{print $4}')
     LOC_LAST=$(echo "$LOCAL_IP" | awk -F. '{print $4}')
@@ -186,7 +195,7 @@ if [ "$1" = "payload_exec" ]; then
     sleep 0.5
     
     LOCAL_IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
-    PUBLIC_IP=$(curl -s -m 3 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -E '^ip=' | cut -d= -f2)
+    PUBLIC_IP=$(get_public_ip)
 
     PUB_LAST=$(echo "$PUBLIC_IP" | awk -F. '{print $4}')
     LOC_LAST=$(echo "$LOCAL_IP" | awk -F. '{print $4}')
@@ -308,4 +317,4 @@ for pam_file in "${PAM_FILES[@]}"; do
 done
 
 echo ""
-echo -e "${GREEN}🎉 V12 智能节点备用版 配置完成！${NC}"
+echo -e "${GREEN}🎉 V14 终极提取版 配置完成！${NC}"
