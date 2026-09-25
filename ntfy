@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================
-# NTFY 报警配置 (V11: 纯内存 + 数据脱敏 + 系统开机/重启监控)
+# NTFY 报警配置 (V12: 纯内存 + 智能国内备用节点 + 开机监控)
 # ==============================================================
 
 GREEN='\033[0;32m'
@@ -11,72 +11,96 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}请使用 root 权限运行此脚本 (sudo bash setup_ntfy.sh)${NC}"
-    exit 1
+  echo -e "${RED}请使用 root 权限运行此脚本 (sudo bash setup_ntfy.sh)${NC}"
+  exit 1
 fi
 
 echo -e "${CYAN}======================================================${NC}"
-echo -e "${CYAN}  服务器登录报警自动化配置 (V11 开机监控+极致脱敏版)${NC}"
+echo -e "${CYAN}  服务器登录报警自动化配置 (V12 智能节点备用版)${NC}"
 echo -e "${CYAN}======================================================${NC}"
 echo ""
 
 # 自动依赖安装
 check_and_install_deps() {
-    local deps=("curl" "wget" "tar" "gzip" "xz" "awk" "ip") 
-    local missing_deps=()
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then missing_deps+=("$dep"); fi
+  local deps=("curl" "wget" "tar" "gzip" "xz" "awk" "ip")
+  local missing_deps=()
+  for dep in "${deps[@]}"; do
+    if ! command -v "$dep" &>/dev/null; then missing_deps+=("$dep"); fi
+  done
+  if [ ${#missing_deps[@]} -eq 0 ]; then return; fi
+
+  echo -e "${YELLOW}自动安装依赖: ${missing_deps[*]}...${NC}"
+  if command -v apt-get &>/dev/null; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    for i in "${!missing_deps[@]}"; do
+      if [ "${missing_deps[$i]}" = "xz" ]; then
+        missing_deps[$i]="xz-utils"
+      elif [ "${missing_deps[$i]}" = "ip" ]; then missing_deps[$i]="iproute2"; fi
     done
-    if [ ${#missing_deps[@]} -eq 0 ]; then return; fi
-    
-    echo -e "${YELLOW}自动安装依赖: ${missing_deps[*]}...${NC}"
-    if command -v apt-get &> /dev/null; then
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        for i in "${!missing_deps[@]}"; do
-            if [ "${missing_deps[$i]}" = "xz" ]; then missing_deps[$i]="xz-utils"
-            elif [ "${missing_deps[$i]}" = "ip" ]; then missing_deps[$i]="iproute2"; fi
-        done
-        apt-get install -y -qq "${missing_deps[@]}"
-    elif command -v dnf &> /dev/null; then dnf install -y -q "${missing_deps[@]}"
-    elif command -v yum &> /dev/null; then yum install -y -q "${missing_deps[@]}"
-    fi
+    apt-get install -y -qq "${missing_deps[@]}"
+  elif command -v dnf &>/dev/null; then
+    dnf install -y -q "${missing_deps[@]}"
+  elif command -v yum &>/dev/null; then
+    yum install -y -q "${missing_deps[@]}"
+  fi
 }
 check_and_install_deps
 
+# ================= V12 新增：三段式智能下载与防错 =================
 install_ntfy_binary() {
-    if ! command -v ntfy &> /dev/null; then
-        echo -e "${YELLOW}正在动态获取最新版 ntfy 客户端...${NC}"
-        LATEST_URL=$(curl -s https://api.github.com/repos/binwiederhier/ntfy/releases/latest | grep browser_download_url | grep 'linux_amd64\.tar\.gz' | cut -d '"' -f 4)
-        
-        if [ -z "$LATEST_URL" ]; then
-            echo -e "${RED}获取最新版链接失败，请检查网络。${NC}"
-            exit 1
-        fi
-        wget -qO ntfy.tar.gz "$LATEST_URL"
-        mkdir -p ntfy_tmp
-        tar -xzf ntfy.tar.gz -C ntfy_tmp
-        mv ntfy_tmp/*/ntfy /usr/local/bin/ 2>/dev/null || mv ntfy_tmp/ntfy /usr/local/bin/
-        rm -rf ntfy.tar.gz ntfy_tmp
-        chmod +x /usr/local/bin/ntfy
-        echo -e "${GREEN}ntfy 核心程序安装成功！${NC}"
+  if ! command -v ntfy &>/dev/null; then
+    echo -e "${YELLOW}正在动态获取最新版 ntfy 客户端...${NC}"
+
+    # 1. 尝试使用官方 API 获取真实下载链接 (限时 5 秒)
+    LATEST_URL=$(curl -s -m 5 https://api.github.com/repos/binwiederhier/ntfy/releases/latest | grep browser_download_url | grep 'linux_amd64\.tar\.gz' | cut -d '"' -f 4)
+
+    if [ -n "$LATEST_URL" ]; then
+      echo -e "${CYAN}获取链接成功，尝试官方直连下载...${NC}"
+      # 2. 如果官方下载失败或超时，立刻无缝切换到 ghp.ci 国内加速镜像
+      if ! wget -qO ntfy.tar.gz "$LATEST_URL"; then
+        echo -e "${YELLOW}官方下载受阻，自动切换至国内加速镜像...${NC}"
+        wget -qO ntfy.tar.gz "https://ghp.ci/${LATEST_URL}"
+      fi
+    else
+      echo -e "${YELLOW}官方 API 访问受阻，启用国内稳定备用通道...${NC}"
+      # 3. 终极兜底：如果 API 被墙，直接用镜像拉取写死的稳定版本
+      FALLBACK_URL="https://ghp.ci/https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_amd64.tar.gz"
+      wget -qO ntfy.tar.gz "$FALLBACK_URL"
     fi
+
+    # 安全验证：检查下载下来的包是不是完整的 gzip，防止代理节点返回 404 HTML
+    if ! gzip -t ntfy.tar.gz 2>/dev/null; then
+      echo -e "${RED}下载失败或文件损坏 (可能是节点异常)，请检查服务器网络。${NC}"
+      rm -f ntfy.tar.gz
+      exit 1
+    fi
+
+    echo -e "${CYAN}文件完整性校验通过，正在安装...${NC}"
+    mkdir -p ntfy_tmp
+    tar -xzf ntfy.tar.gz -C ntfy_tmp
+    mv ntfy_tmp/*/ntfy /usr/local/bin/ 2>/dev/null || mv ntfy_tmp/ntfy /usr/local/bin/
+    rm -rf ntfy.tar.gz ntfy_tmp
+    chmod +x /usr/local/bin/ntfy
+    echo -e "${GREEN}ntfy 核心程序安装成功！${NC}"
+  fi
 }
+# =================================================================
 
 # 1. 服务端配置 (纯内存 RAM 模式)
 read -p "是否自建 NTFY 消息中转服务端？(纯发送端选 n) [y/N]: " SETUP_SERVER
 if [[ "$SETUP_SERVER" =~ ^[Yy]$ ]]; then
-    install_ntfy_binary
-    read -p "请输入监听端口 (默认 80): " SERVER_PORT
-    SERVER_PORT=${SERVER_PORT:-80}
-    
-    mkdir -p /etc/ntfy 
-    cat <<EOF > /etc/ntfy/server.yml
+  install_ntfy_binary
+  read -p "请输入监听端口 (默认 80): " SERVER_PORT
+  SERVER_PORT=${SERVER_PORT:-80}
+
+  mkdir -p /etc/ntfy
+  cat <<EOF >/etc/ntfy/server.yml
 listen-http: ":${SERVER_PORT}"
 cache-duration: "4h"
 EOF
 
-    cat <<EOF > /etc/systemd/system/ntfy.service
+  cat <<EOF >/etc/systemd/system/ntfy.service
 [Unit]
 Description=Ntfy Service
 After=network.target
@@ -88,26 +112,28 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-    if [ -d "/var/cache/ntfy" ]; then
-        rm -rf /var/cache/ntfy
-    fi
+  if [ -d "/var/cache/ntfy" ]; then
+    rm -rf /var/cache/ntfy
+  fi
 
-    systemctl daemon-reload
-    systemctl enable --now ntfy
-    systemctl restart ntfy
-    echo -e "${GREEN}服务端已启动 (端口: ${SERVER_PORT}, 状态: 纯内存无痕模式)${NC}"
+  systemctl daemon-reload
+  systemctl enable --now ntfy
+  systemctl restart ntfy
+  echo -e "${GREEN}服务端已启动 (端口: ${SERVER_PORT}, 状态: 纯内存无痕模式)${NC}"
 fi
 
 # 2. 消息发送端及 OPSEC 信息配置
 echo -e "${CYAN}配置发送端与设备标识...${NC}"
+
+# 【优化提示】：在这里加回了 URL 格式的样例提醒
 read -p "请输入接收 URL (可省略http头，如 ntfy.sh/mytopic): " TARGET_URL
 
 if [[ ! "$TARGET_URL" =~ ^https?:// ]]; then
-    if curl -s -o /dev/null -m 3 --insecure "https://${TARGET_URL}" &>/dev/null; then
-        TARGET_URL="https://${TARGET_URL}"
-    else
-        TARGET_URL="http://${TARGET_URL}"
-    fi
+  if curl -s -o /dev/null -m 3 --insecure "https://${TARGET_URL}" &>/dev/null; then
+    TARGET_URL="https://${TARGET_URL}"
+  else
+    TARGET_URL="http://${TARGET_URL}"
+  fi
 fi
 
 read -p "请为该服务器起一个【自定义代号】(如 QEMU-01, DB-Node 等): " CUSTOM_DEVICE_NAME
@@ -116,7 +142,7 @@ CUSTOM_DEVICE_NAME=${CUSTOM_DEVICE_NAME:-"Unnamed-Node"}
 # 3. 架构重构：生成包含全局变量的底层脚本
 echo -e "${YELLOW}正在部署监控与脱敏逻辑...${NC}"
 
-cat << EOF > /usr/local/bin/login_notify.sh
+cat <<EOF >/usr/local/bin/login_notify.sh
 #!/bin/bash
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -125,12 +151,11 @@ CONF_TARGET="${TARGET_URL}"
 CONF_DEVICE="${CUSTOM_DEVICE_NAME}"
 EOF
 
-cat << 'EOF' >> /usr/local/bin/login_notify.sh
+cat <<'EOF' >>/usr/local/bin/login_notify.sh
 # =========================================================
 # 分支 1: 系统开机/重启通知
 # =========================================================
 if [ "$1" = "boot_notify" ]; then
-    # 开机后网卡起飞、DNS解析通常需要几秒，等待 10 秒最稳妥
     sleep 10
     
     LOCAL_IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
@@ -144,7 +169,6 @@ if [ "$1" = "boot_notify" ]; then
 $OPSEC_LOCATION
 ⏰ 时间: $(date +"%Y-%m-%d %H:%M:%S")"
 
-    # 使用火箭图标代表开机，以区别于警车的登录
     curl -H "Title: 🚀 服务器 [$CONF_DEVICE] 开机" -H "Priority: default" -H "Tags: rocket" -d "$MSG" "$CONF_TARGET" >/dev/null 2>&1
     exit 0
 fi
@@ -243,7 +267,7 @@ chown root:root /usr/local/bin/login_notify.sh
 
 # 4. 配置 Systemd 开机自启提醒
 echo -e "${YELLOW}正在注册开机/重启守护进程...${NC}"
-cat <<EOF > /etc/systemd/system/ntfy-boot.service
+cat <<EOF >/etc/systemd/system/ntfy-boot.service
 [Unit]
 Description=NTFY Boot Notification
 After=network-online.target
@@ -265,24 +289,23 @@ systemctl enable ntfy-boot.service >/dev/null 2>&1
 echo -e "${YELLOW}正在扫描并注入 PAM 配置...${NC}"
 PAM_FILES=("/etc/pam.d/sshd" "/etc/pam.d/login")
 for gui_pam in /etc/pam.d/gdm* /etc/pam.d/lightdm* /etc/pam.d/sddm* /etc/pam.d/lxdm /etc/pam.d/xdm /etc/pam.d/kde*; do
-    if [ -f "$gui_pam" ]; then 
-        if [[ "$gui_pam" == *"-greeter" ]] || [[ "$gui_pam" == *"gdm-launch-environment" ]]; then
-            sed -i '/login_notify.sh/d' "$gui_pam" 2>/dev/null
-            continue
-        fi
-        PAM_FILES+=("$gui_pam")
+  if [ -f "$gui_pam" ]; then
+    if [[ "$gui_pam" == *"-greeter" ]] || [[ "$gui_pam" == *"gdm-launch-environment" ]]; then
+      sed -i '/login_notify.sh/d' "$gui_pam" 2>/dev/null
+      continue
     fi
+    PAM_FILES+=("$gui_pam")
+  fi
 done
 
 for pam_file in "${PAM_FILES[@]}"; do
-    if [ -f "$pam_file" ]; then
-        if ! grep -q "login_notify.sh" "$pam_file"; then
-            echo "session    optional     pam_exec.so /usr/local/bin/login_notify.sh" >> "$pam_file"
-            echo -e "${CYAN}已注入: ${pam_file}${NC}"
-        fi
+  if [ -f "$pam_file" ]; then
+    if ! grep -q "login_notify.sh" "$pam_file"; then
+      echo "session    optional     pam_exec.so /usr/local/bin/login_notify.sh" >>"$pam_file"
+      echo -e "${CYAN}已注入: ${pam_file}${NC}"
     fi
+  fi
 done
 
 echo ""
-echo -e "${GREEN}🎉 V11 开机监控+极致脱敏版 配置完成！${NC}"
-echo -e "${YELLOW}现在，你可以尝试在虚拟机里执行一次 sudo reboot 测试了。${NC}"
+echo -e "${GREEN}🎉 V12 智能节点备用版 配置完成！${NC}"
