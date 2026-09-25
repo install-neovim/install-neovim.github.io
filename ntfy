@@ -1,0 +1,288 @@
+#!/bin/bash
+
+# ==============================================================
+# NTFY 报警配置 (V11: 纯内存 + 数据脱敏 + 系统开机/重启监控)
+# ==============================================================
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}请使用 root 权限运行此脚本 (sudo bash setup_ntfy.sh)${NC}"
+    exit 1
+fi
+
+echo -e "${CYAN}======================================================${NC}"
+echo -e "${CYAN}  服务器登录报警自动化配置 (V11 开机监控+极致脱敏版)${NC}"
+echo -e "${CYAN}======================================================${NC}"
+echo ""
+
+# 自动依赖安装
+check_and_install_deps() {
+    local deps=("curl" "wget" "tar" "gzip" "xz" "awk" "ip") 
+    local missing_deps=()
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then missing_deps+=("$dep"); fi
+    done
+    if [ ${#missing_deps[@]} -eq 0 ]; then return; fi
+    
+    echo -e "${YELLOW}自动安装依赖: ${missing_deps[*]}...${NC}"
+    if command -v apt-get &> /dev/null; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        for i in "${!missing_deps[@]}"; do
+            if [ "${missing_deps[$i]}" = "xz" ]; then missing_deps[$i]="xz-utils"
+            elif [ "${missing_deps[$i]}" = "ip" ]; then missing_deps[$i]="iproute2"; fi
+        done
+        apt-get install -y -qq "${missing_deps[@]}"
+    elif command -v dnf &> /dev/null; then dnf install -y -q "${missing_deps[@]}"
+    elif command -v yum &> /dev/null; then yum install -y -q "${missing_deps[@]}"
+    fi
+}
+check_and_install_deps
+
+install_ntfy_binary() {
+    if ! command -v ntfy &> /dev/null; then
+        echo -e "${YELLOW}正在动态获取最新版 ntfy 客户端...${NC}"
+        LATEST_URL=$(curl -s https://api.github.com/repos/binwiederhier/ntfy/releases/latest | grep browser_download_url | grep 'linux_amd64\.tar\.gz' | cut -d '"' -f 4)
+        
+        if [ -z "$LATEST_URL" ]; then
+            echo -e "${RED}获取最新版链接失败，请检查网络。${NC}"
+            exit 1
+        fi
+        wget -qO ntfy.tar.gz "$LATEST_URL"
+        mkdir -p ntfy_tmp
+        tar -xzf ntfy.tar.gz -C ntfy_tmp
+        mv ntfy_tmp/*/ntfy /usr/local/bin/ 2>/dev/null || mv ntfy_tmp/ntfy /usr/local/bin/
+        rm -rf ntfy.tar.gz ntfy_tmp
+        chmod +x /usr/local/bin/ntfy
+        echo -e "${GREEN}ntfy 核心程序安装成功！${NC}"
+    fi
+}
+
+# 1. 服务端配置 (纯内存 RAM 模式)
+read -p "是否自建 NTFY 消息中转服务端？(纯发送端选 n) [y/N]: " SETUP_SERVER
+if [[ "$SETUP_SERVER" =~ ^[Yy]$ ]]; then
+    install_ntfy_binary
+    read -p "请输入监听端口 (默认 80): " SERVER_PORT
+    SERVER_PORT=${SERVER_PORT:-80}
+    
+    mkdir -p /etc/ntfy 
+    cat <<EOF > /etc/ntfy/server.yml
+listen-http: ":${SERVER_PORT}"
+cache-duration: "4h"
+EOF
+
+    cat <<EOF > /etc/systemd/system/ntfy.service
+[Unit]
+Description=Ntfy Service
+After=network.target
+[Service]
+ExecStart=/usr/local/bin/ntfy serve
+Restart=always
+User=root
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    if [ -d "/var/cache/ntfy" ]; then
+        rm -rf /var/cache/ntfy
+    fi
+
+    systemctl daemon-reload
+    systemctl enable --now ntfy
+    systemctl restart ntfy
+    echo -e "${GREEN}服务端已启动 (端口: ${SERVER_PORT}, 状态: 纯内存无痕模式)${NC}"
+fi
+
+# 2. 消息发送端及 OPSEC 信息配置
+echo -e "${CYAN}配置发送端与设备标识...${NC}"
+read -p "请输入接收 URL (可省略http头，如 ntfy.sh/mytopic): " TARGET_URL
+
+if [[ ! "$TARGET_URL" =~ ^https?:// ]]; then
+    if curl -s -o /dev/null -m 3 --insecure "https://${TARGET_URL}" &>/dev/null; then
+        TARGET_URL="https://${TARGET_URL}"
+    else
+        TARGET_URL="http://${TARGET_URL}"
+    fi
+fi
+
+read -p "请为该服务器起一个【自定义代号】(如 QEMU-01, DB-Node 等): " CUSTOM_DEVICE_NAME
+CUSTOM_DEVICE_NAME=${CUSTOM_DEVICE_NAME:-"Unnamed-Node"}
+
+# 3. 架构重构：生成包含全局变量的底层脚本
+echo -e "${YELLOW}正在部署监控与脱敏逻辑...${NC}"
+
+cat << EOF > /usr/local/bin/login_notify.sh
+#!/bin/bash
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 全局脱敏配置
+CONF_TARGET="${TARGET_URL}"
+CONF_DEVICE="${CUSTOM_DEVICE_NAME}"
+EOF
+
+cat << 'EOF' >> /usr/local/bin/login_notify.sh
+# =========================================================
+# 分支 1: 系统开机/重启通知
+# =========================================================
+if [ "$1" = "boot_notify" ]; then
+    # 开机后网卡起飞、DNS解析通常需要几秒，等待 10 秒最稳妥
+    sleep 10
+    
+    LOCAL_IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    PUBLIC_IP=$(curl -s -m 3 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -E '^ip=' | cut -d= -f2)
+
+    PUB_LAST=$(echo "$PUBLIC_IP" | awk -F. '{print $4}')
+    LOC_LAST=$(echo "$LOCAL_IP" | awk -F. '{print $4}')
+    OPSEC_LOCATION="📍 定位: ${PUB_LAST:--} / ${LOC_LAST:--}"
+
+    MSG="⚙️ 事件: 系统开机/重启 (Boot Up)
+$OPSEC_LOCATION
+⏰ 时间: $(date +"%Y-%m-%d %H:%M:%S")"
+
+    # 使用火箭图标代表开机，以区别于警车的登录
+    curl -H "Title: 🚀 服务器 [$CONF_DEVICE] 开机" -H "Priority: default" -H "Tags: rocket" -d "$MSG" "$CONF_TARGET" >/dev/null 2>&1
+    exit 0
+fi
+
+# =========================================================
+# 分支 2: 登录脱敏汇报 (异步)
+# =========================================================
+if [ "$1" = "payload_exec" ]; then
+    shift
+    _USER="$1"
+    _RHOST="$2"
+    _SERVICE="$3"
+    _PPID="$4"
+    
+    sleep 0.5
+    
+    LOCAL_IP=$(ip -4 addr show scope global 2>/dev/null | grep inet | grep -v '127.0.0.1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    PUBLIC_IP=$(curl -s -m 3 https://1.1.1.1/cdn-cgi/trace 2>/dev/null | grep -E '^ip=' | cut -d= -f2)
+
+    PUB_LAST=$(echo "$PUBLIC_IP" | awk -F. '{print $4}')
+    LOC_LAST=$(echo "$LOCAL_IP" | awk -F. '{print $4}')
+    OPSEC_LOCATION="📍 定位: ${PUB_LAST:--} / ${LOC_LAST:--}"
+
+    if [ -n "$_RHOST" ]; then
+        if echo "$_RHOST" | grep -q '\.'; then
+            OPSEC_RHOST=$(echo "$_RHOST" | awk -F. '{print "xx.xx."$3"."$4}')
+        else
+            OPSEC_RHOST="[隐藏来源: 非标准IPv4]"
+        fi
+    else
+        OPSEC_RHOST="本地屏幕直登"
+    fi
+
+    AUTH_METHOD="❓ 未知登录方式"
+    if [ "$_SERVICE" = "sshd" ]; then
+        AUTH_LOG=$(journalctl -u ssh -u sshd --since "1 min ago" --no-pager 2>/dev/null | grep -i "Accepted" | grep "$_USER" | tail -n 1)
+        if [ -z "$AUTH_LOG" ]; then
+            if [ -f /var/log/auth.log ]; then
+                AUTH_LOG=$(tail -n 50 /var/log/auth.log | grep -i "sshd" | grep -i "Accepted" | grep "$_USER" | tail -n 1)
+            elif [ -f /var/log/secure ]; then
+                AUTH_LOG=$(tail -n 50 /var/log/secure | grep -i "sshd" | grep -i "Accepted" | grep "$_USER" | tail -n 1)
+            fi
+        fi
+
+        if echo "$AUTH_LOG" | grep -q -i "publickey"; then
+            AUTH_METHOD="🔑 SSH 密钥 (Public Key)"
+        elif echo "$AUTH_LOG" | grep -q -i "password"; then
+            AUTH_METHOD="📝 SSH 密码 (Password)"
+        elif echo "$AUTH_LOG" | grep -q -i "keyboard-interactive"; then
+            AUTH_METHOD="📱 两步验证/交互"
+        else
+            AUTH_METHOD="❓ SSH 日志抓取失败"
+        fi
+    elif [ "$_SERVICE" = "login" ]; then
+        AUTH_METHOD="🖥️ 物理终端 (TTY local)"
+    else
+        AUTH_METHOD="🎨 桌面组件 (触发: $_SERVICE)"
+    fi
+
+    MSG="👤 用户: $_USER
+🌐 来源: $OPSEC_RHOST
+🛠️ 服务: $_SERVICE
+$AUTH_METHOD
+$OPSEC_LOCATION
+⏰ 时间: $(date +"%Y-%m-%d %H:%M:%S")"
+
+    curl -H "Title: 🚨 服务器 [$CONF_DEVICE] 登录" -H "Priority: high" -H "Tags: warning" -d "$MSG" "$CONF_TARGET" >/dev/null 2>&1
+    exit 0
+fi
+
+# =========================================================
+# 分支 3: PAM 触发器 (0延迟)
+# =========================================================
+if [ "$PAM_TYPE" != "open_session" ]; then exit 0; fi
+
+if [[ "$PAM_SERVICE" == *"-greeter" || "$PAM_SERVICE" == "gdm-launch-environment" ]]; then
+    exit 0
+fi
+
+case "$PAM_SERVICE" in
+    sshd|login|gdm*|lightdm*|sddm*|*xdm|kde*) ;;
+    *) exit 0 ;;
+esac
+
+if command -v systemd-run >/dev/null 2>&1; then
+    systemd-run --quiet --collect --unit="ntfy-login-$$" \
+        /usr/local/bin/login_notify.sh "payload_exec" "$PAM_USER" "$PAM_RHOST" "$PAM_SERVICE" "$PPID" >/dev/null 2>&1
+else
+    nohup /usr/local/bin/login_notify.sh "payload_exec" "$PAM_USER" "$PAM_RHOST" "$PAM_SERVICE" "$PPID" </dev/null >/dev/null 2>&1 &
+fi
+exit 0
+EOF
+
+chmod 755 /usr/local/bin/login_notify.sh
+chown root:root /usr/local/bin/login_notify.sh
+
+# 4. 配置 Systemd 开机自启提醒
+echo -e "${YELLOW}正在注册开机/重启守护进程...${NC}"
+cat <<EOF > /etc/systemd/system/ntfy-boot.service
+[Unit]
+Description=NTFY Boot Notification
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/login_notify.sh boot_notify
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable ntfy-boot.service >/dev/null 2>&1
+
+# 5. 挂载到 PAM 配置
+echo -e "${YELLOW}正在扫描并注入 PAM 配置...${NC}"
+PAM_FILES=("/etc/pam.d/sshd" "/etc/pam.d/login")
+for gui_pam in /etc/pam.d/gdm* /etc/pam.d/lightdm* /etc/pam.d/sddm* /etc/pam.d/lxdm /etc/pam.d/xdm /etc/pam.d/kde*; do
+    if [ -f "$gui_pam" ]; then 
+        if [[ "$gui_pam" == *"-greeter" ]] || [[ "$gui_pam" == *"gdm-launch-environment" ]]; then
+            sed -i '/login_notify.sh/d' "$gui_pam" 2>/dev/null
+            continue
+        fi
+        PAM_FILES+=("$gui_pam")
+    fi
+done
+
+for pam_file in "${PAM_FILES[@]}"; do
+    if [ -f "$pam_file" ]; then
+        if ! grep -q "login_notify.sh" "$pam_file"; then
+            echo "session    optional     pam_exec.so /usr/local/bin/login_notify.sh" >> "$pam_file"
+            echo -e "${CYAN}已注入: ${pam_file}${NC}"
+        fi
+    fi
+done
+
+echo ""
+echo -e "${GREEN}🎉 V11 开机监控+极致脱敏版 配置完成！${NC}"
+echo -e "${YELLOW}现在，你可以尝试在虚拟机里执行一次 sudo reboot 测试了。${NC}"

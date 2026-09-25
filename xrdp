@@ -89,3 +89,71 @@ echo "推荐连接命令：xfreerdp3 /v:<服务器IP>:3389 /u:root /p:<密码> /
 
 # 检查证书
 openssl x509 -in /etc/xrdp/cert.pem -noout -fingerprint -sha256
+
+####### 如果服务端音频出现问题 ########
+
+# 先尝试注释掉 /etc/xrdp/startwm.sh 文件中的两行命令
+# # unset DBUS_SESSION_BUS_ADDRESS
+# # unset XDG_RUNTIME_DIR
+
+# 如果还不行再尝试
+
+#!/bin/bash
+
+# ==========================================
+# Ubuntu 24.04 XRDP PipeWire 音频桥接修复脚本
+# ==========================================
+
+# 必须以 root 权限运行
+# if [ "$EUID" -ne 0 ]; then
+#     echo "❌ 请使用 root 权限运行此脚本 (例如: sudo bash $0)"
+#     exit 1
+# fi
+#
+# echo "⏳ 开始修复 XRDP 音频环境 (基于 PipeWire)..."
+#
+# # 1. 彻底卸载冲突的老旧 PulseAudio
+# echo "🧹 [1/4] 清理旧版 PulseAudio 及其残留..."
+# apt-get remove -y pulseaudio pulseaudio-module-xrdp 2>/dev/null
+# apt-get autoremove -y
+#
+# # 2. 安装现代化的 PipeWire 核心与编译工具链
+# echo "📦 [2/4] 安装 PipeWire 组件与构建工具..."
+# apt-get update -y
+# apt-get install -y pipewire pipewire-pulse pipewire-audio \
+#     git build-essential pkg-config libpipewire-0.3-dev \
+#     libspa-0.2-dev autoconf automake libtool
+#
+# # 3. 下载源码并编译安装
+# echo "⚙️  [3/4] 克隆并编译 pipewire-module-xrdp..."
+# cd /tmp
+# rm -rf pipewire-module-xrdp
+# git clone https://github.com/neutrinolabs/pipewire-module-xrdp.git
+# cd pipewire-module-xrdp
+#
+# echo "🔨 开始执行构建流程 (bootstrap -> configure -> make)..."
+# ./bootstrap
+# ./configure
+# make
+#
+# echo "📥 安装模块到系统中..."
+# make install
+#
+# # 清理临时源码目录
+# cd /tmp
+# rm -rf pipewire-module-xrdp
+#
+# # 4. 重启相关服务
+# echo "🔄 [4/4] 刷新系统链接并重启 XRDP 服务..."
+# ldconfig
+# systemctl restart xrdp
+#
+# echo "=================================================="
+# echo -e "\033[32m✅ XRDP 音频模块 (PipeWire) 编译安装成功！\033[0m"
+# echo "=================================================="
+# echo -e "⚠️  \033[1;33m极其重要：\033[0m"
+# echo "虽然服务已重启，但音频守护进程通常与用户会话深度绑定。"
+# echo "为了确保新音频管道被系统完美接管，强烈建议您现在直接重启服务器："
+# echo -e "\033[36msudo reboot\033[0m"
+# echo "重启后，使用普通用户登录远程桌面，声音即可正常传输。"
+# echo "=================================================="
